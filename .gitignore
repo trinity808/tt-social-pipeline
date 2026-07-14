@@ -1,0 +1,52 @@
+# --- Secrets & local config (never commit these) ---
+.env
+.env.*
+!.env.example
+*.env.local
+credentials/
+*-key.json
+*service-account*.json
+*.pem
+
+# --- Byte-compiled / cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- Distribution / packaging ---
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Testing / coverage ---
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- LangGraph / LangSmith local state ---
+.langgraph_api/
