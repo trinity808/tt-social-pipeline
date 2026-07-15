@@ -1,0 +1,31 @@
+# --- Local config ---
+python-dotenv
+
+# --- Content fetch (Phase 0) ---
+requests
+beautifulsoup4
+
+# --- Structured output validation (writer/critic schemas) ---
+pydantic
+
+# --- Orchestration (Phase 1-3) ---
+langgraph
+
+# --- LLM providers ---
+groq
+openai          # DALL-E 3 image gen, and Vertex's OpenAI-compatible Gemini endpoint (same pattern as DebateClub)
+
+# --- GCP clients (Phase 0/4) ---
+google-cloud-secret-manager
+google-cloud-firestore
+google-auth
+
+# --- Cloud Run service entrypoint (Phase 5) ---
+flask
+gunicorn
+
+# --- Testing (Phase 6) ---
+pytest
+
+# --- Optional: agent tracing, uncomment if you set up LangSmith ---
+# langsmith
