@@ -12,8 +12,8 @@ pydantic
 langgraph
 
 # --- LLM providers ---
-groq
 openai          # DALL-E 3 image gen, and Vertex's OpenAI-compatible Gemini endpoint (same pattern as DebateClub)
+google-genai
 
 # --- GCP clients (Phase 0/4) ---
 google-cloud-secret-manager
