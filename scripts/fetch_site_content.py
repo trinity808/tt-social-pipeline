@@ -19,11 +19,11 @@ PAGES = {
     "about": "/about",
     "therapeutic_services": "/therapeutic-services",
     "speech_language": "/speech-and-language",
-    "psychiatry_medication": "/psychiatry-&-medication",
+    "psychiatry_medication": "/psychiatry-%26-medication",
     "psychological_evaluations": "/psychological-evaluations",
     "neuropsychological_evals": "/neuropsychological-evals",
     "softwave_trt": "/softwave-trt",
-    "insurance_payments": "/insurance-&-payments",
+    "insurance_payments": "/insurance-%26-payments",
     "students": "/students",
     "faqs": "/faqs",
     "contact": "/contact",
@@ -31,13 +31,25 @@ PAGES = {
 
 OUTPUT_PATH = Path("content/site_content.json")
 
+# Fixed boilerplate that appears on every page (banner + nav menu, sometimes
+# twice per page if a mobile nav duplicates the desktop one in the DOM).
+# Confirmed exact strings from actual fetched output — update here if the
+# site's nav/banner text ever changes.
+BANNER = "Extended hours: Evenings & weekends for your convenience"
+NAV = ("Home About Services Therapeutic Services Speech and Language "
+       "Psychiatry & Medication Psychological Evaluations Neuropsychological Evals "
+       "Softwave TRT Insurance & Payments Students FAQ's Contact "
+       "Schedule an appointment")
 
-def extract_text(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
+
+def extract_text(html_bytes: bytes) -> str:
+    soup = BeautifulSoup(html_bytes, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
         tag.decompose()
     text = soup.get_text(separator=" ")
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()          # normalize whitespace FIRST
+    text = text.replace(BANNER, "").replace(NAV, "")  # then remove known boilerplate
+    text = re.sub(r"\s+", " ", text).strip()          # cleanup any gap left by removal
     return text
 
 
@@ -45,7 +57,9 @@ def fetch_page(path: str) -> str:
     url = BASE_URL + path
     resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
     resp.raise_for_status()
-    return extract_text(resp.text)
+    return extract_text(resp.content)  # raw bytes, not resp.text — lets BeautifulSoup
+    # do its own encoding detection instead of relying on requests' guess, which was
+    # producing mojibake on this site's special characters (curly quotes, &, etc.)
 
 
 def main():
