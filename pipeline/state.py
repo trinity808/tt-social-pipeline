@@ -1,4 +1,5 @@
 import json
+from typing import Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -37,3 +38,12 @@ def parse_draft(raw: str) -> SocialPostDraft:
 
     parsed = json.loads(raw)  # let this raise on malformed JSON, don't hide it
     return SocialPostDraft(**parsed)  # let this raise on schema mismatch, don't hide it
+
+
+class PipelineState(TypedDict):
+    """Shared state passed between LangGraph nodes. Each node returns only
+    the keys it's updating -- LangGraph merges them into the running state,
+    it's not a full-object replacement the way SocialPostDraft is."""
+    topic_key: str
+    topic_content: str
+    draft: Optional[SocialPostDraft]
