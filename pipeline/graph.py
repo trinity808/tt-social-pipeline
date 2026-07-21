@@ -5,16 +5,28 @@ from langgraph.graph import END, StateGraph
 from agents.critic import critique_draft
 from agents.writer import draft_post, revise_post
 from pipeline.state import PipelineState
+from pipeline.rotation import record_topic_used, select_topic
 
 CONTENT_PATH = "content/site_content.json"
 MAX_RETRIES = 1  # 1 retry = 2 total writer attempts before giving up
 
 
 def load_topic(state: PipelineState) -> dict:
-    print(f"[load_topic] loading '{state['topic_key']}'...")
+    topic_key = state.get("topic_key")
+    auto_selected = topic_key is None
+
+    if auto_selected:
+        topic_key = select_topic()
+
+    print(f"[load_topic] loading '{topic_key}'{' (auto-selected)' if auto_selected else ''}...")
+
     with open(CONTENT_PATH, "r", encoding="utf-8") as f:
         content = json.load(f)
-    return {"topic_content": content[state["topic_key"]]}
+
+    if auto_selected:
+        record_topic_used(topic_key)
+
+    return {"topic_key": topic_key, "topic_content": content[topic_key]}
 
 
 def draft(state: PipelineState) -> dict:
@@ -76,7 +88,7 @@ def build_graph():
 
 if __name__ == "__main__":
     app = build_graph()
-    result = app.invoke({"topic_key": "insurance_payments"})
+    result = app.invoke({})
 
     print("Final verdict:")
     print(result["verdict"].model_dump_json(indent=2))
