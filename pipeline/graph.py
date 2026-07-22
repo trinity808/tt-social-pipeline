@@ -105,7 +105,7 @@ def build_graph():
     graph.add_edge("load_topic", "draft")
 
     graph.add_edge("draft", "critic")
-    graph.add_conditional_edges("critic", route_after_critic, {"revise": "revise", "end": END})
+    graph.add_conditional_edges("critic", route_after_critic, {"revise": "revise", "end": "generate_image"})
     graph.add_edge("revise", "critic")
     graph.add_edge("generate_image", END)
 
@@ -122,4 +122,4 @@ if __name__ == "__main__":
     print("\nFinal draft:")
     print(result["draft"].model_dump_json(indent=2))
     print(f"\nRetries used: {result.get('retry_count', 0)}")
-    print(f"\nImage saved to: {result['image_path']}")
+    print(f"\nImage saved to: {result.get('image_path')}")
