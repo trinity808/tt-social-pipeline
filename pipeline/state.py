@@ -1,6 +1,5 @@
 import json
-from typing import Optional, TypedDict
-
+from typing import Optional, TypedDict,NotRequired
 from pydantic import BaseModel, Field
 
 
@@ -47,3 +46,5 @@ class PipelineState(TypedDict):
     topic_key: str
     topic_content: str
     draft: Optional[SocialPostDraft]
+    image_prompt: NotRequired[str]
+    image_path: NotRequired[str]

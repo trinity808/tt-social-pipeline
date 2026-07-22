@@ -50,3 +50,6 @@ Thumbs.db
 
 # --- LangGraph / LangSmith local state ---
 .langgraph_api/
+
+#Image Generator
+generated_images/
