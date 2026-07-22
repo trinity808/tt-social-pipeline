@@ -3,8 +3,8 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from pipeline.prompts import build_prompt
-from pipeline.state import parse_draft, SocialPostDraft
+from pipeline.prompts import build_prompt, build_revision_prompt
+from pipeline.state import CriticVerdict, parse_model, SocialPostDraft
 
 load_dotenv()
 
@@ -17,4 +17,18 @@ def draft_post(topic_content: str, model: str = "gpt-5.5") -> SocialPostDraft:
         model=model,
         messages=[{"role": "user", "content": prompt}],
     )
-    return parse_draft(response.choices[0].message.content)
+    return parse_model(response.choices[0].message.content, SocialPostDraft)
+
+
+def revise_post(
+    topic_content: str,
+    previous_draft: SocialPostDraft,
+    verdict: CriticVerdict,
+    model: str = "gpt-5.5",
+) -> SocialPostDraft:
+    prompt = build_revision_prompt(topic_content, previous_draft, verdict)
+    response = openai_client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return parse_model(response.choices[0].message.content, SocialPostDraft)

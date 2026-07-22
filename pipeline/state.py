@@ -1,5 +1,6 @@
 import json
-from typing import Optional, TypedDict,NotRequired
+
+from typing import Optional, TypedDict,NotRequired,TypeVar
 from pydantic import BaseModel, Field
 
 
@@ -24,7 +25,24 @@ class SocialPostDraft(BaseModel):
     facebook: FacebookDraft
 
 
-def parse_draft(raw: str) -> SocialPostDraft:
+class PlatformVerdict(BaseModel):
+    approved: bool
+    reason: str
+
+
+class CriticVerdict(BaseModel):
+    linkedin: PlatformVerdict
+    instagram: PlatformVerdict
+    facebook: PlatformVerdict
+
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+def parse_model(raw: str, model_cls: type[ModelT]) -> ModelT:
+    """Generic over SocialPostDraft, CriticVerdict, or any future schema --
+    both the writer and critic need identical JSON-extraction handling, so
+    this replaces what used to be a SocialPostDraft-only parse_draft()."""
     raw = raw.strip()
 
     # Defensive: strip markdown code fences in case a model wraps JSON
@@ -36,7 +54,7 @@ def parse_draft(raw: str) -> SocialPostDraft:
         raw = raw.strip()
 
     parsed = json.loads(raw)  # let this raise on malformed JSON, don't hide it
-    return SocialPostDraft(**parsed)  # let this raise on schema mismatch, don't hide it
+    return model_cls(**parsed)  # let this raise on schema mismatch, don't hide it
 
 
 class PipelineState(TypedDict):
@@ -46,5 +64,8 @@ class PipelineState(TypedDict):
     topic_key: str
     topic_content: str
     draft: Optional[SocialPostDraft]
+    verdict: Optional[CriticVerdict]
+    retry_count: int
     image_prompt: NotRequired[str]
     image_path: NotRequired[str]
+
