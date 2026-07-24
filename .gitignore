@@ -27,6 +27,7 @@ env/
 ENV/
 
 # --- Testing / coverage ---
+scripts/bakeoff_results.json
 .pytest_cache/
 .coverage
 htmlcov/

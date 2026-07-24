@@ -1,4 +1,5 @@
 from pipeline.state import CriticVerdict, SocialPostDraft
+import random
 
 # Stable facts true on every post regardless of topic -- shared across all
 # three prompts so the critic isn't missing context the writer always has.
@@ -160,3 +161,59 @@ def build_revision_prompt(topic_content: str, previous_draft: SocialPostDraft, v
         platform_rules=PLATFORM_RULES,
         response_shape=RESPONSE_SHAPE,
     )
+
+import random
+
+IMAGE_STYLES = [
+    "bold infographic with simple icons and clean layout",
+    "clean minimalist poster with abstract geometric shapes",
+    "typographic design with decorative geometric elements",
+    "gentle illustrated scene with soft abstract shapes",
+]
+
+IMAGE_COLOR_PALETTES = [
+    "warm earthy tones -- terracotta, cream, olive",
+    "cool professional -- navy, white, soft blue",
+    "bold high contrast -- deep teal, bright white, coral accent",
+    "dark professional -- charcoal, gold, white",
+]
+
+IMAGE_PROMPT_TEMPLATE = """Create one professional square social-media image for Trinity Tree Psychological Services, a clinical psychology practice in Glendale, Arizona.
+
+Topic:
+{topic_key}
+
+Approved website information:
+{source_excerpt}
+
+Related social-media caption:
+{caption_excerpt}
+
+Style: {style}
+Color palette: {color_palette}
+
+Visual requirements:
+- Clean, warm, calm, modern, and trustworthy.
+- Suitable for a professional mental-health practice.
+- Include the text "Trinity Tree Psychological Services" visibly but subtly integrated into the design -- not as a large headline, not overlapping the main visual.
+- Use diverse, inclusive visual symbolism when people are relevant.
+- Do not show identifiable real people.
+- Do not depict distress, medical emergencies, medications, restraints, diagnoses, or treatment outcomes.
+- Do not invent services or claims not supported by the supplied content.
+- Do not include any text other than the practice name above -- no additional slogans, phone numbers, URLs, hashtags, or invented quotes.
+- Do not include logos.
+- Avoid a generic therapy-room scene.
+- Use balanced composition with sufficient negative space.
+"""
+
+
+def build_image_prompt(topic_key: str, topic_content: str, caption: str) -> str:
+    source_excerpt = " ".join(topic_content.split())[:3500]
+    caption_excerpt = " ".join(caption.split())[:1000]
+    return IMAGE_PROMPT_TEMPLATE.format(
+        topic_key=topic_key,
+        source_excerpt=source_excerpt,
+        caption_excerpt=caption_excerpt,
+        style=random.choice(IMAGE_STYLES),
+        color_palette=random.choice(IMAGE_COLOR_PALETTES),
+    ).strip()
