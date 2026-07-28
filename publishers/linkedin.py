@@ -221,7 +221,16 @@ def refresh_access_token() -> None:
         if refresh_expires_in is not None:
             update_fields["refresh_token_expires_at"] = now + timedelta(seconds=refresh_expires_in)
  
-    TOKEN_META_DOC.set(update_fields, merge=True)
+    try:
+            TOKEN_META_DOC.set(update_fields, merge=True)
+    except Exception as e:
+        print(
+            f"[linkedin] WARNING: new tokens were saved to Secret Manager successfully, "
+            f"but updating Firestore's expiry tracking failed ({e}). The token itself is "
+            f"fine -- this will just cause an unnecessary (harmless) refresh attempt next run."
+        )
+        return
+
     print("[linkedin] access token refreshed successfully.")
  
  
@@ -277,6 +286,15 @@ def post_to_linkedin(caption: str, hashtags: list[str], image_path: str | Path) 
         json=payload,
         timeout=30,
     )
+
+    if response.status_code == 401:
+            raise RuntimeError(
+                f"LinkedIn rejected the access token as invalid or expired (401), despite "
+                f"passing our own expiry check -- likely revoked externally (a password "
+                f"change or permission change on LinkedIn's side, rather than a normal "
+                f"expiry we'd have caught). Manual token regeneration is likely required; "
+                f"see the README's token renewal steps. Response: {response.text}"
+            )
 
     if response.status_code != 201:
         raise RuntimeError(f"LinkedIn post failed -- status {response.status_code}: {response.text}")
