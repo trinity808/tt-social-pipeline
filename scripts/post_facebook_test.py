@@ -1,97 +1,212 @@
 """
-One-time manual test: shows a hardcoded caption and one existing image from
-generated_images/ for human review, and only posts to Facebook if explicitly
-confirmed.
+Manual Facebook publisher test.
 
-TEMPORARY: skips the graph entirely (no OpenAI/Gemini calls) to avoid
-burning tokens while debugging the Facebook API call itself. Swap back to
-the full graph once posting is confirmed working.
+This script intentionally skips the LangGraph pipeline, LLM calls,
+critic calls, and image generation. It selects the newest existing image
+from generated_images/, displays a preview, and only publishes after an
+explicit confirmation.
 
-Run from the repo root: python -m scripts.post_facebook_test
+Run from the repository root:
+
+    python -m scripts.post_facebook_test
 """
 
-import mimetypes
-import os
+from __future__ import annotations
+
 from pathlib import Path
 
-import requests
-from dotenv import load_dotenv
+from publishers.facebook import (
+    FacebookAuthenticationError,
+    FacebookPermissionError,
+    FacebookPublishError,
+    FacebookRateLimitError,
+    FacebookSecretError,
+    FacebookTemporaryError,
+    format_caption,
+    post_to_facebook,
+)
 
-load_dotenv()
 
-ACCESS_TOKEN = os.environ["META_ACCESS_TOKEN"].strip()
-PAGE_ID = os.environ["FACEBOOK_PAGE_ID"].strip()
+# ---------------------------------------------------------------------------
+# Test configuration
+# ---------------------------------------------------------------------------
 
-GRAPH_API_VERSION = os.getenv(
-    "META_GRAPH_VERSION",
-    "v25.0",  # v26.0 doesn't exist yet -- not expected until ~Sept 2026
-).strip()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+IMAGE_DIR = PROJECT_ROOT / "generated_images"
 
-if not GRAPH_API_VERSION.startswith("v"):
-    GRAPH_API_VERSION = f"v{GRAPH_API_VERSION}"
+SUPPORTED_IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+}
 
-PHOTO_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{PAGE_ID}/photos"
+TEST_CAPTION = (
+    "This is a test post from Trinity Tree's new social-media "
+    "pipeline. Please ignore."
+)
 
-IMAGE_DIR = Path("generated_images")
+TEST_HASHTAGS = [
+    "TrinityTreePsychServices",
+    "MentalHealth",
+    "GlendaleAZ",
+]
 
-# TEMPORARY hardcoded caption -- swap back to the graph once posting works
-HARDCODED_CAPTION = "This is a test post from Trinity Tree's new pipeline. Please ignore."
 
+# ---------------------------------------------------------------------------
+# Test-image selection
+# ---------------------------------------------------------------------------
 
 def find_test_image() -> Path:
-    if not IMAGE_DIR.is_dir():
-        raise FileNotFoundError(f"'{IMAGE_DIR}' directory not found -- run from the repo root.")
-
-    images = sorted(
-        p for p in IMAGE_DIR.iterdir()
-        if p.suffix.lower() in {".png", ".jpg", ".jpeg"}
-    )
-
-    if not images:
-        raise FileNotFoundError(f"No image files found in '{IMAGE_DIR}'.")
-
-    return images[0]
-
-
-def post_to_facebook(caption: str, image_path: Path) -> None:
-    content_type = mimetypes.guess_type(image_path.name)[0] or "application/octet-stream"
-
-    print(f"\nUploading {image_path.name} to Facebook...")
-
-    with image_path.open("rb") as image_file:
-        response = requests.post(
-            PHOTO_URL,
-            headers={"Authorization": f"Bearer {ACCESS_TOKEN}"},
-            data={"message": caption, "published": "true"},
-            files={"source": (image_path.name, image_file, content_type)},
-            timeout=120,
+    """Return the newest supported image in generated_images/."""
+    if not IMAGE_DIR.exists():
+        raise FileNotFoundError(
+            f"The image directory does not exist: {IMAGE_DIR}"
         )
 
+    if not IMAGE_DIR.is_dir():
+        raise FacebookPublishError(
+            f"The image path is not a directory: {IMAGE_DIR}"
+        )
+
+    images = [
+        image_path
+        for image_path in IMAGE_DIR.iterdir()
+        if (
+            image_path.is_file()
+            and image_path.suffix.lower()
+            in SUPPORTED_IMAGE_EXTENSIONS
+        )
+    ]
+
+    if not images:
+        raise FileNotFoundError(
+            "No supported images were found in:\n"
+            f"{IMAGE_DIR}\n"
+            "Supported formats: PNG, JPG, JPEG, and WEBP."
+        )
+
+    # Use the most recently modified image.
+    return max(
+        images,
+        key=lambda path: path.stat().st_mtime,
+    ).resolve()
+
+
+# ---------------------------------------------------------------------------
+# Manual test runner
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    """Preview and manually approve one Facebook test post."""
     try:
-        response_body = response.json()
-    except ValueError:
-        response_body = {"response": response.text}
+        image_path = find_test_image()
 
-    print("Facebook response:", response.status_code, response_body)
+    except (FileNotFoundError, FacebookPublishError) as error:
+        print(
+            f"\nFacebook test setup failed:\n{error}"
+        )
+        return
 
-    if response.status_code == 200:
-        print(f"\nPosted successfully. Photo ID: {response_body.get('id')}")
-        if response_body.get("post_id"):
-            print(f"Post ID: {response_body.get('post_id')}")
-    else:
-        print(f"\nFAILED -- status {response.status_code}")
+    except OSError as error:
+        print(
+            "\nFacebook test could not inspect generated_images/.\n"
+            f"Error: {error}"
+        )
+        return
+
+    preview = format_caption(
+        caption=TEST_CAPTION,
+        hashtags=TEST_HASHTAGS,
+    )
+
+    print("\n" + "=" * 60)
+    print("FACEBOOK TEST POST PREVIEW")
+    print("=" * 60)
+    print(preview)
+    print(f"\nExisting image: {image_path}")
+    print("=" * 60)
+
+    confirmation = input(
+        "\nPost this to TT's real Facebook page? "
+        "Type 'yes' to confirm: "
+    ).strip().lower()
+
+    if confirmation != "yes":
+        print("\nFacebook post cancelled.")
+        return
+
+    try:
+        response_body = post_to_facebook(
+            caption=TEST_CAPTION,
+            hashtags=TEST_HASHTAGS,
+            image_path=image_path,
+        )
+
+    except FacebookSecretError as error:
+        print(
+            f"\nSecret Manager error:\n{error}"
+        )
+        return
+
+    except FacebookAuthenticationError as error:
+        print(
+            f"\nFacebook authentication error:\n{error}"
+        )
+        return
+
+    except FacebookPermissionError as error:
+        print(
+            f"\nFacebook permission error:\n{error}"
+        )
+        return
+
+    except FacebookRateLimitError as error:
+        print(
+            f"\nFacebook rate-limit error:\n{error}"
+        )
+        return
+
+    except FacebookTemporaryError as error:
+        print(
+            f"\nTemporary Facebook error:\n{error}"
+        )
+        return
+
+    except FileNotFoundError as error:
+        print(
+            f"\nImage error:\n{error}"
+        )
+        return
+
+    except FacebookPublishError as error:
+        print(
+            f"\nFacebook publishing error:\n{error}"
+        )
+        return
+
+    except Exception as error:
+        print(
+            "\nUnexpected Facebook test error.\n"
+            f"Error type: {type(error).__name__}\n"
+            f"Error: {error}"
+        )
+        return
+
+    print(
+        "\nFacebook publishing test completed."
+    )
+
+    if response_body.get("post_id"):
+        print(
+            f"Post ID: {response_body['post_id']}"
+        )
+
+    if response_body.get("id"):
+        print(
+            f"Facebook ID: {response_body['id']}"
+        )
 
 
 if __name__ == "__main__":
-    image_path = find_test_image()
-
-    print("--- Caption to post ---")
-    print(HARDCODED_CAPTION)
-    print(f"--- Image: {image_path} ---\n")
-
-    confirm = input("Post this to TT's real Facebook page? Type 'yes' to confirm: ").strip().lower()
-
-    if confirm == "yes":
-        post_to_facebook(HARDCODED_CAPTION, image_path)
-    else:
-        print("Not posted.")
+    main()
