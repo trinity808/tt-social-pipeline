@@ -20,7 +20,7 @@ google-cloud-secret-manager
 google-cloud-firestore
 google-auth
 google-cloud-storage
-
+google-cloud-logging
 # --- Cloud Run service entrypoint (Phase 5) ---
 flask
 gunicorn
