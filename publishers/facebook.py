@@ -18,17 +18,13 @@ from google.api_core.exceptions import (
 from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import secretmanager
 
-# TEMPORARILY NOT USED:
-# The graph is disabled so it does not generate a new image.
-#
-# from pipeline.graph import build_graph
-
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env")
 
 GCP_PROJECT_ID = os.getenv(
     "GCP_PROJECT_ID",
@@ -48,35 +44,10 @@ GRAPH_API_VERSION = os.getenv(
 if GRAPH_API_VERSION and not GRAPH_API_VERSION.startswith("v"):
     GRAPH_API_VERSION = f"v{GRAPH_API_VERSION}"
 
-# This is the Secret Manager secret name, not the long Meta token.
-META_ACCESS_TOKEN_SECRET_ID = "meta-access-token"
+# Secret Manager secret name, not the long Meta access token.
+META_ACCESS_TOKEN_SECRET_ID = "META_ACCESS_TOKEN"
 
 REQUEST_TIMEOUT_SECONDS = 120
-
-# publishers/facebook.py is inside the publishers folder.
-# parents[1] points to the repository root.
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-IMAGE_DIR = PROJECT_ROOT / "generated_images"
-
-SUPPORTED_IMAGE_EXTENSIONS = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".webp",
-}
-
-# Temporary test content while the graph is disabled.
-TEST_CAPTION = (
-    "This is a test post from Trinity Tree's new social-media "
-    "pipeline. Please ignore."
-)
-
-TEST_HASHTAGS = [
-    "TrinityTreePsychServices",
-    "MentalHealth",
-    "GlendaleAZ",
-]
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +83,7 @@ class FacebookSecretError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 def _validate_configuration() -> None:
-    """Validate required configuration values."""
+    """Validate required Facebook publisher configuration values."""
     missing_values: list[str] = []
 
     if not GCP_PROJECT_ID:
@@ -125,7 +96,7 @@ def _validate_configuration() -> None:
         raise FacebookPublishError(
             "Missing required environment variable(s): "
             f"{', '.join(missing_values)}.\n"
-            "Add them to the project's .env file."
+            "Add them to the project's .env file or runtime environment."
         )
 
     if not GRAPH_API_VERSION:
@@ -153,7 +124,7 @@ def _get_secret(secret_id: str) -> str:
     """
     if not GCP_PROJECT_ID:
         raise FacebookSecretError(
-            "GCP_PROJECT_ID is missing from the .env file."
+            "GCP_PROJECT_ID is missing from the environment."
         )
 
     secret_name = (
@@ -165,9 +136,7 @@ def _get_secret(secret_id: str) -> str:
         client = secretmanager.SecretManagerServiceClient()
 
         response = client.access_secret_version(
-            request={
-                "name": secret_name,
-            }
+            request={"name": secret_name}
         )
 
     except DefaultCredentialsError as error:
@@ -232,59 +201,6 @@ def _get_secret(secret_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Existing-image selection
-# ---------------------------------------------------------------------------
-
-def find_existing_image() -> Path:
-    """
-    Select the newest existing image from generated_images/.
-
-    This function does not generate an image.
-    """
-    if not IMAGE_DIR.exists():
-        raise FileNotFoundError(
-            f"The image directory does not exist: {IMAGE_DIR}"
-        )
-
-    if not IMAGE_DIR.is_dir():
-        raise FacebookPublishError(
-            f"The image path is not a directory: {IMAGE_DIR}"
-        )
-
-    images = [
-        image_path
-        for image_path in IMAGE_DIR.iterdir()
-        if (
-            image_path.is_file()
-            and image_path.suffix.lower()
-            in SUPPORTED_IMAGE_EXTENSIONS
-        )
-    ]
-
-    if not images:
-        raise FileNotFoundError(
-            "No supported images were found in:\n"
-            f"{IMAGE_DIR}\n"
-            "Supported formats: PNG, JPG, JPEG, and WEBP."
-        )
-
-    # Pick the newest image based on its modification time.
-    selected_image = max(
-        images,
-        key=lambda path: path.stat().st_mtime,
-    ).resolve()
-
-    print(
-        "\n[facebook] Selected existing image:"
-    )
-    print(
-        f"[facebook] {selected_image}"
-    )
-
-    return selected_image
-
-
-# ---------------------------------------------------------------------------
 # Caption formatting
 # ---------------------------------------------------------------------------
 
@@ -295,8 +211,7 @@ def format_caption(
     """
     Combine the Facebook caption and hashtags.
 
-    Hashtags are normalized so they start with # and contain
-    no spaces.
+    Hashtags are normalized so they start with # and contain no spaces.
     """
     clean_caption = caption.strip()
     formatted_hashtags: list[str] = []
@@ -367,7 +282,6 @@ def _parse_facebook_response(
     except (TypeError, ValueError):
         normalized_error_code = None
 
-    # Meta commonly uses code 190 for expired or invalid tokens.
     authentication_failed = (
         response.status_code == 401
         or normalized_error_code in {102, 190}
@@ -437,13 +351,13 @@ def post_to_facebook(
     image_path: str | Path,
 ) -> dict:
     """
-    Upload an existing image and publish it to Facebook.
+    Upload an image and publish it to the configured Facebook Page.
 
     The Page access token is read from GCP Secret Manager.
     """
     _validate_configuration()
 
-    if not caption.strip():
+    if not isinstance(caption, str) or not caption.strip():
         raise FacebookPublishError(
             "The Facebook caption is empty."
         )
@@ -472,9 +386,15 @@ def post_to_facebook(
             f"{resolved_image_path}"
         )
 
-    access_token = _get_secret(
-        META_ACCESS_TOKEN_SECRET_ID
-    )
+    access_token = os.getenv(
+        "META_ACCESS_TOKEN",
+        "",
+    ).strip()
+
+    if not access_token:
+        raise FacebookAuthenticationError(
+            "META_ACCESS_TOKEN is missing from the .env file."
+        )
 
     message = format_caption(
         caption=caption,
@@ -504,9 +424,7 @@ def post_to_facebook(
             response = requests.post(
                 photo_url,
                 headers={
-                    "Authorization": (
-                        f"Bearer {access_token}"
-                    ),
+                    "Authorization": f"Bearer {access_token}",
                 },
                 data={
                     "message": message,
@@ -573,209 +491,3 @@ def post_to_facebook(
         )
 
     return response_body
-
-
-# ---------------------------------------------------------------------------
-# Manual Facebook test
-# ---------------------------------------------------------------------------
-
-def main() -> None:
-    """
-    Publish using an existing image from generated_images/.
-
-    The graph, LLM calls, critic calls, and image generation are
-    temporarily disabled.
-    """
-    print(
-        "\nStarting Facebook test with an existing image...\n"
-    )
-
-    try:
-        _validate_configuration()
-
-        # -----------------------------------------------------------
-        # ORIGINAL GRAPH-BASED FLOW — TEMPORARILY DISABLED
-        # -----------------------------------------------------------
-        #
-        # The following code runs the complete LangGraph pipeline.
-        #
-        # IMPORTANT:
-        # app.invoke({}) currently runs every graph node, including
-        # the image-generation node. Therefore, merely ignoring
-        # result["image_path"] would not stop a new image from being
-        # generated.
-        #
-        # Uncomment this section later when you want the complete
-        # pipeline to generate the caption, hashtags, and image.
-        #
-        # from pipeline.graph import build_graph
-        #
-        # app = build_graph()
-        # result = app.invoke({})
-        #
-        # final_draft = result.get("draft")
-        #
-        # if final_draft is None:
-        #     raise FacebookPublishError(
-        #         "The graph did not return a draft."
-        #     )
-        #
-        # facebook_draft = getattr(
-        #     final_draft,
-        #     "facebook",
-        #     None,
-        # )
-        #
-        # if facebook_draft is None:
-        #     raise FacebookPublishError(
-        #         "The graph did not return a Facebook draft."
-        #     )
-        #
-        # caption = facebook_draft.caption
-        # hashtags = facebook_draft.hashtags
-        #
-        # ORIGINAL GENERATED-IMAGE PATH:
-        #
-        # raw_image_path = result.get("image_path")
-        #
-        # if not raw_image_path:
-        #     raise FacebookPublishError(
-        #         "The graph did not return image_path."
-        #     )
-        #
-        # image_path = Path(
-        #     raw_image_path
-        # ).expanduser().resolve()
-        #
-        # -----------------------------------------------------------
-        # END OF DISABLED GRAPH-BASED FLOW
-        # -----------------------------------------------------------
-
-        # -----------------------------------------------------------
-        # ACTIVE TEMPORARY TEST FLOW
-        # -----------------------------------------------------------
-        #
-        # No graph or image generation is performed.
-        # The caption and hashtags are hardcoded, and an existing
-        # image is selected from generated_images/.
-        #
-        caption = TEST_CAPTION
-        hashtags = TEST_HASHTAGS
-
-        image_path = find_existing_image()
-
-    except FacebookPublishError as error:
-        print(
-            f"\nConfiguration error:\n{error}"
-        )
-        return
-
-    except FileNotFoundError as error:
-        print(
-            f"\nImage-selection error:\n{error}"
-        )
-        return
-
-    except Exception as error:
-        print(
-            "\nFacebook test setup failed.\n"
-            f"Error type: {type(error).__name__}\n"
-            f"Error: {error}"
-        )
-        return
-
-    message = format_caption(
-        caption=caption,
-        hashtags=hashtags,
-    )
-
-    print("\n" + "=" * 60)
-    print("FACEBOOK TEST POST PREVIEW")
-    print("=" * 60)
-    print(message)
-    print(f"\nExisting image: {image_path}")
-    print("=" * 60)
-
-    confirmation = input(
-        "\nPost this to TT's real Facebook page? "
-        "Type 'yes' to confirm: "
-    ).strip().lower()
-
-    if confirmation != "yes":
-        print("\nFacebook post cancelled.")
-        return
-
-    try:
-        response_body = post_to_facebook(
-            caption=caption,
-            hashtags=hashtags,
-            image_path=image_path,
-        )
-
-    except FacebookSecretError as error:
-        print(
-            f"\nSecret Manager error:\n{error}"
-        )
-        return
-
-    except FacebookAuthenticationError as error:
-        print(
-            f"\nFacebook authentication error:\n{error}"
-        )
-        return
-
-    except FacebookPermissionError as error:
-        print(
-            f"\nFacebook permission error:\n{error}"
-        )
-        return
-
-    except FacebookRateLimitError as error:
-        print(
-            f"\nFacebook rate-limit error:\n{error}"
-        )
-        return
-
-    except FacebookTemporaryError as error:
-        print(
-            f"\nTemporary Facebook error:\n{error}"
-        )
-        return
-
-    except FileNotFoundError as error:
-        print(
-            f"\nImage error:\n{error}"
-        )
-        return
-
-    except FacebookPublishError as error:
-        print(
-            f"\nFacebook publishing error:\n{error}"
-        )
-        return
-
-    except Exception as error:
-        print(
-            "\nUnexpected Facebook publishing error.\n"
-            f"Error type: {type(error).__name__}\n"
-            f"Error: {error}"
-        )
-        return
-
-    print(
-        "\nFacebook publishing test completed."
-    )
-
-    if response_body.get("post_id"):
-        print(
-            f"Post ID: {response_body['post_id']}"
-        )
-
-    if response_body.get("id"):
-        print(
-            f"Facebook ID: {response_body['id']}"
-        )
-
-
-if __name__ == "__main__":
-    main()
