@@ -17,6 +17,7 @@ from google.api_core.exceptions import (
 )
 from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import secretmanager
+from pipeline.prompts import format_caption
 
 
 # ---------------------------------------------------------------------------
@@ -198,44 +199,6 @@ def _get_secret(secret_id: str) -> str:
         )
 
     return secret_value
-
-
-# ---------------------------------------------------------------------------
-# Caption formatting
-# ---------------------------------------------------------------------------
-
-def format_caption(
-    caption: str,
-    hashtags: Sequence[str] | None = None,
-) -> str:
-    """
-    Combine the Facebook caption and hashtags.
-
-    Hashtags are normalized so they start with # and contain no spaces.
-    """
-    clean_caption = caption.strip()
-    formatted_hashtags: list[str] = []
-
-    for raw_hashtag in hashtags or []:
-        hashtag = str(raw_hashtag).strip()
-
-        if not hashtag:
-            continue
-
-        hashtag = hashtag.replace(" ", "")
-
-        if not hashtag.startswith("#"):
-            hashtag = f"#{hashtag}"
-
-        formatted_hashtags.append(hashtag)
-
-    hashtag_text = " ".join(formatted_hashtags)
-
-    if clean_caption and hashtag_text:
-        return f"{clean_caption}\n\n{hashtag_text}"
-
-    return clean_caption or hashtag_text
-
 
 # ---------------------------------------------------------------------------
 # Meta API response handling

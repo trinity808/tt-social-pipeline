@@ -13,6 +13,7 @@ from urllib.parse import quote
 import requests
 from dotenv import load_dotenv
 from google.cloud import firestore, secretmanager
+from pipeline.prompts import format_caption
 
 load_dotenv()
 
@@ -66,22 +67,6 @@ def get_organization_urn() -> str:
 
 
 ORG_URN = get_organization_urn()
-
-
-def format_caption(caption: str, hashtags: list[str]) -> str:
-    formatted_hashtags: list[str] = []
-    for hashtag in hashtags:
-        hashtag = hashtag.strip().replace(" ", "")
-        if not hashtag:
-            continue
-        if not hashtag.startswith("#"):
-            hashtag = f"#{hashtag}"
-        formatted_hashtags.append(hashtag)
-
-    if not formatted_hashtags:
-        return caption.strip()
-
-    return f"{caption.strip()}\n\n{' '.join(formatted_hashtags)}"
 
 
 def _get_api_headers(access_token: str, include_content_type: bool = False) -> dict[str, str]:
