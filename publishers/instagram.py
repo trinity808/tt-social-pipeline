@@ -17,6 +17,10 @@ from google.cloud import storage
 import requests
 import time
 
+from pipeline.meta_errors import parse_meta_response
+from pipeline.prompts import format_caption
+from pipeline.secrets import _get_secret
+
 load_dotenv()
 
 GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
@@ -25,6 +29,8 @@ GCS_BUCKET_NAME = "tt-social-pipeline-images"
 GRAPH_API_VERSION = "v25.0"
 
 storage_client = storage.Client(project=GCP_PROJECT_ID)
+
+INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "").strip()
 
 
 def upload_image_to_gcs(image_path: str | Path) -> str:
@@ -53,11 +59,11 @@ def create_media_container(ig_user_id: str, image_url: str, caption: str, access
         },
         timeout=30,
     )
-    response.raise_for_status()
+    response_body = parse_meta_response(response)
 
-    container_id = response.json().get("id")
+    container_id = response_body.get("id")
     if not container_id:
-        raise RuntimeError(f"Instagram did not return a container ID. Response: {response.text}")
+        raise RuntimeError(f"Instagram did not return a container ID. Response: {response_body}")
 
     return container_id
 
@@ -71,9 +77,9 @@ def wait_for_container_status(container_id: str, access_token: str) -> None:
             params={"fields": "status_code", "access_token": access_token},
             timeout=30,
         )
-        response.raise_for_status()
+        response_body = parse_meta_response(response)
 
-        status = response.json().get("status_code")
+        status = response_body.get("status_code")
 
         if status == "FINISHED":
             return
@@ -97,10 +103,32 @@ def publish_container(ig_user_id: str, container_id: str, access_token: str) -> 
         },
         timeout=30,
     )
-    response.raise_for_status()
+    response_body = parse_meta_response(response)
 
-    media_id = response.json().get("id")
+    media_id = response_body.get("id")
     if not media_id:
-        raise RuntimeError(f"Instagram did not return a published media ID. Response: {response.text}")
+        raise RuntimeError(f"Instagram did not return a published media ID. Response: {response_body}")
 
     return media_id
+
+def publish_to_instagram(caption: str, hashtags: list[str], image_path: str | Path) -> str:
+    """Publishes an approved caption + image to Instagram. Returns the
+    published media ID."""
+    if not INSTAGRAM_BUSINESS_ACCOUNT_ID:
+        raise RuntimeError("INSTAGRAM_BUSINESS_ACCOUNT_ID is missing from the .env file.")
+
+    access_token = _get_secret("meta-access-token")
+    formatted_caption = format_caption(caption, hashtags)
+
+    image_url = upload_image_to_gcs(image_path)
+
+    container_id = create_media_container(
+        ig_user_id=INSTAGRAM_BUSINESS_ACCOUNT_ID,
+        image_url=image_url,
+        caption=formatted_caption,
+        access_token=access_token,
+    )
+
+    wait_for_container_status(container_id, access_token)
+
+    return publish_container(INSTAGRAM_BUSINESS_ACCOUNT_ID, container_id, access_token)
