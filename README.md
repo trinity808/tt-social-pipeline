@@ -22,3 +22,17 @@ LinkedIn's access token refreshes automatically every ~60 days — no action nee
 6. That's it — do not manually edit Firestore. The pipeline's next scheduled run will see the old stored expiry, trigger an automatic refresh using the newly-pushed refresh token, and update Firestore's expiry tracking on its own.
 
 **Known gotcha:** `LINKEDIN_VERSION` in `.env` is a recurring source of confusing failures if it's ever left stale after LinkedIn rotates its supported API versions (`NONEXISTENT_VERSION` / HTTP 426 errors). If posting starts failing after a long gap with no code changes, check this value against LinkedIn's current API docs before assuming anything else is broken.
+
+## Meta (Facebook/Instagram) token notes
+
+The Page access token used for both Facebook and Instagram publishing does **not** need any refresh logic, unlike LinkedIn's. Confirmed via Meta's token debug tool: `expires_at: 0` and `data_access_expires_at: 0`, meaning it's genuinely non-expiring, not just long-lived.
+
+**If this token is ever lost or invalidated** (revoked permission, app changes, etc.), regenerating it correctly requires two steps, not one:
+
+1. Generate a fresh token from the `postautomationbot` System User (Business Suite → Settings → Users → System users → select it → Generate token, with the full scope set: `pages_show_list`, `business_management`, `instagram_basic`, `instagram_content_publish`, `pages_read_engagement`, `pages_manage_posts`).
+2. **This System User token cannot be used directly for posting** — `debug_token` will show `"type": "SYSTEM_USER"`, and Facebook's `/photos` endpoint (among others) will reject it with a generic, misleading permissions error. It must be exchanged for the Page's own token:
+
+https://graph.facebook.com/v25.0/{FACEBOOK_PAGE_ID}?fields=access_token&access_token={SYSTEM_USER_TOKEN}
+
+   The `access_token` field in that response is the real, `"type": "PAGE"` token — that's what goes into Secret Manager (`meta-access-token`), not the System User token itself.
+3. Confirm with `debug_token` again before trusting it — should show `"type": "PAGE"` and both expiry fields still at `0`.

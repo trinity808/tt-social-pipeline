@@ -12,7 +12,9 @@ from urllib.parse import quote
 
 import requests
 from dotenv import load_dotenv
-from google.cloud import firestore, secretmanager
+from google.cloud import firestore
+from pipeline.prompts import format_caption
+from pipeline.secrets import _get_secret, _set_secret
 
 load_dotenv()
 
@@ -28,28 +30,8 @@ REFRESH_MARGIN_DAYS = 7  # proactively refresh if within this many days of expir
 SECRET_ACCESS_TOKEN_ID = "linkedin-access-token"
 SECRET_REFRESH_TOKEN_ID = "linkedin-refresh-token"
 
-secret_client = secretmanager.SecretManagerServiceClient()
 db = firestore.Client(project=GCP_PROJECT_ID)
 TOKEN_META_DOC = db.collection("linkedin_auth").document("token_meta")
-
-
-# --- Secret Manager helpers ---
-
-def _get_secret(secret_id: str) -> str:
-    name = f"projects/{GCP_PROJECT_ID}/secrets/{secret_id}/versions/latest"
-    response = secret_client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
-
-
-def _set_secret(secret_id: str, value: str) -> None:
-    parent = f"projects/{GCP_PROJECT_ID}/secrets/{secret_id}"
-    secret_client.add_secret_version(
-        request={
-            "parent": parent,
-            "payload": {"data": value.encode("UTF-8")},
-        }
-    )
-
 
 # --- Ported from Sukanya's manual test script, unchanged in logic ---
 
@@ -66,22 +48,6 @@ def get_organization_urn() -> str:
 
 
 ORG_URN = get_organization_urn()
-
-
-def format_caption(caption: str, hashtags: list[str]) -> str:
-    formatted_hashtags: list[str] = []
-    for hashtag in hashtags:
-        hashtag = hashtag.strip().replace(" ", "")
-        if not hashtag:
-            continue
-        if not hashtag.startswith("#"):
-            hashtag = f"#{hashtag}"
-        formatted_hashtags.append(hashtag)
-
-    if not formatted_hashtags:
-        return caption.strip()
-
-    return f"{caption.strip()}\n\n{' '.join(formatted_hashtags)}"
 
 
 def _get_api_headers(access_token: str, include_content_type: bool = False) -> dict[str, str]:
@@ -222,7 +188,7 @@ def refresh_access_token() -> None:
             update_fields["refresh_token_expires_at"] = now + timedelta(seconds=refresh_expires_in)
  
     try:
-            TOKEN_META_DOC.set(update_fields, merge=True)
+        TOKEN_META_DOC.set(update_fields, merge=True)
     except Exception as e:
         print(
             f"[linkedin] WARNING: new tokens were saved to Secret Manager successfully, "
@@ -288,13 +254,13 @@ def post_to_linkedin(caption: str, hashtags: list[str], image_path: str | Path) 
     )
 
     if response.status_code == 401:
-            raise RuntimeError(
-                f"LinkedIn rejected the access token as invalid or expired (401), despite "
-                f"passing our own expiry check -- likely revoked externally (a password "
-                f"change or permission change on LinkedIn's side, rather than a normal "
-                f"expiry we'd have caught). Manual token regeneration is likely required; "
-                f"see the README's token renewal steps. Response: {response.text}"
-            )
+        raise RuntimeError(
+            f"LinkedIn rejected the access token as invalid or expired (401), despite "
+            f"passing our own expiry check -- likely revoked externally (a password "
+            f"change or permission change on LinkedIn's side, rather than a normal "
+            f"expiry we'd have caught). Manual token regeneration is likely required; "
+            f"see the README's token renewal steps. Response: {response.text}"
+        )
 
     if response.status_code != 201:
         raise RuntimeError(f"LinkedIn post failed -- status {response.status_code}: {response.text}")
