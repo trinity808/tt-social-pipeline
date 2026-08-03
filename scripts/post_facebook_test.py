@@ -15,16 +15,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from publishers.facebook import (
-    FacebookAuthenticationError,
-    FacebookPermissionError,
-    FacebookPublishError,
-    FacebookRateLimitError,
-    FacebookSecretError,
-    FacebookTemporaryError,
-    format_caption,
-    post_to_facebook,
-)
+from publishers.facebook import post_to_facebook
+from pipeline.meta_errors import MetaAuthenticationError, MetaPermissionError, MetaPublishError, MetaRateLimitError, MetaTemporaryError, parse_meta_response
+from pipeline.prompts import format_caption
+from pipeline.secrets import SecretAccessError
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +59,7 @@ def find_test_image() -> Path:
         )
 
     if not IMAGE_DIR.is_dir():
-        raise FacebookPublishError(
+        raise MetaPublishError(
             f"The image path is not a directory: {IMAGE_DIR}"
         )
 
@@ -102,7 +96,7 @@ def main() -> None:
     try:
         image_path = find_test_image()
 
-    except (FileNotFoundError, FacebookPublishError) as error:
+    except (FileNotFoundError, MetaPublishError) as error:
         print(
             f"\nFacebook test setup failed:\n{error}"
         )
@@ -142,32 +136,32 @@ def main() -> None:
             hashtags=TEST_HASHTAGS,
             image_path=image_path,
         )
-
-    except FacebookSecretError as error:
+    
+    except SecretAccessError as error:
         print(
             f"\nSecret Manager error:\n{error}"
         )
         return
 
-    except FacebookAuthenticationError as error:
+    except MetaAuthenticationError as error:
         print(
             f"\nFacebook authentication error:\n{error}"
         )
         return
 
-    except FacebookPermissionError as error:
+    except MetaPermissionError as error:
         print(
             f"\nFacebook permission error:\n{error}"
         )
         return
 
-    except FacebookRateLimitError as error:
+    except MetaRateLimitError as error:
         print(
             f"\nFacebook rate-limit error:\n{error}"
         )
         return
 
-    except FacebookTemporaryError as error:
+    except MetaTemporaryError as error:
         print(
             f"\nTemporary Facebook error:\n{error}"
         )
@@ -179,7 +173,7 @@ def main() -> None:
         )
         return
 
-    except FacebookPublishError as error:
+    except MetaPublishError as error:
         print(
             f"\nFacebook publishing error:\n{error}"
         )

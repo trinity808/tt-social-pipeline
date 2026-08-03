@@ -1,5 +1,6 @@
 from pipeline.state import CriticVerdict, SocialPostDraft
 import random
+from typing import Sequence
 
 # Stable facts true on every post regardless of topic -- shared across all
 # three prompts so the critic isn't missing context the writer always has.
@@ -217,3 +218,31 @@ def build_image_prompt(topic_key: str, topic_content: str, caption: str) -> str:
         style=random.choice(IMAGE_STYLES),
         color_palette=random.choice(IMAGE_COLOR_PALETTES),
     ).strip()
+
+def format_caption(caption: str, hashtags: Sequence[str] | None = None) -> str:
+    """Flattens a caption + hashtag list into the single plain-text string
+    each platform's API actually accepts -- none of LinkedIn's commentary,
+    Facebook's message, or Instagram's caption fields have a distinct
+    hashtag concept at the API level. This is purely formatting, not
+    judgment -- relevance and count were already decided by the writer
+    and critic before this ever runs."""
+    clean_caption = caption.strip()
+    formatted_hashtags: list[str] = []
+
+    for raw_hashtag in hashtags or []:
+        hashtag = str(raw_hashtag).strip().replace(" ", "")
+
+        if not hashtag:
+            continue
+
+        if not hashtag.startswith("#"):
+            hashtag = f"#{hashtag}"
+
+        formatted_hashtags.append(hashtag)
+
+    hashtag_text = " ".join(formatted_hashtags)
+
+    if clean_caption and hashtag_text:
+        return f"{clean_caption}\n\n{hashtag_text}"
+
+    return clean_caption or hashtag_text
