@@ -3,6 +3,11 @@ Fetches TT site content once and stores it as structured JSON, keyed by topic.
 Run this now, and only re-run later if someone notices the site has changed —
 this is not meant to run on every pipeline execution.
 """
+# KNOWN QUIRK: /contact's "Our Hours" widget renders "Open today [X]" based
+# on the live browser's current day -- since this script has no JS
+# execution, whatever day it happens to scrape on gets frozen permanently
+# into site_content.json. If this ever gets re-run, manually replace that
+# line with the full Mon-Sun breakdown afterward, same as done here.
 
 import json
 import re
