@@ -8,6 +8,7 @@ Dockerfile/deploy command, not this file's __main__ block.
 """
 
 import os
+import traceback
 
 from flask import Flask, jsonify
 
@@ -32,6 +33,7 @@ def run_pipeline():
         # Real 500, not a 200 with an error message buried in the body --
         # Cloud Run's own logs/metrics need this to show up as a failure.
         print(f"[main] pipeline run FAILED: {e}")
+        traceback.print_exc()  # full traceback in logs for any future failure, not just this one
         return jsonify({"status": "failed", "error": str(e)}), 500
 
     print(f"[main] pipeline run completed for topic '{result.get('topic_key')}'")
