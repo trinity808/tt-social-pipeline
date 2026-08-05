@@ -6,6 +6,8 @@ from typing import Sequence
 # three prompts so the critic isn't missing context the writer always has.
 COMPANY_CONTEXT = "Trinity Tree Psychological Services is a clinical psychology practice based in Glendale, Arizona, providing evidence-based care for children, teens, and adults."
 
+TIME_SENSITIVITY_RULE = "Do not make same-day-relative claims (e.g. \"today's hours are...\", \"we're open right now\") -- this content may be posted or reused on any day, and such claims can become false immediately. If stating hours or availability, always use explicit day labels (e.g. \"Monday-Friday, 9am-5pm; weekends by appointment\") instead."
+
 # Shared between the writer and revision prompts so a future format change
 # (like the word-count fix) only needs updating in one place.
 PLATFORM_RULES = """LinkedIn: Professional and warm. STRICTLY under 150 words. No hashtags -- return an empty hashtags array. End with a call to action directing readers to visit trinitytreepsych.com.
@@ -34,6 +36,7 @@ CRITIC_RESPONSE_SHAPE = """Return ONLY valid JSON in exactly this shape, with no
 SYSTEM_PROMPT_TEMPLATE = """You are a social media copywriter for Trinity Tree Psychological Services.
 
 {company_context}
+{time_sensitivity_rule}
 
 Write one post about the topic below, adapted for each of three platforms. Write like an actual social media post -- short sentences, conversational -- not a brochure, blog, or a copy-pasted excerpt from a website.
 
@@ -57,6 +60,7 @@ Each platform must read as genuinely distinct from the others -- not the same po
 def build_prompt(topic_content: str) -> str:
     return SYSTEM_PROMPT_TEMPLATE.format(
         company_context=COMPANY_CONTEXT,
+        time_sensitivity_rule=TIME_SENSITIVITY_RULE,
         topic_content=topic_content,
         platform_rules=PLATFORM_RULES,
         response_shape=RESPONSE_SHAPE,
@@ -66,6 +70,7 @@ def build_prompt(topic_content: str) -> str:
 CRITIC_PROMPT_TEMPLATE = """You are reviewing a set of social media captions for Trinity Tree Psychological Services before they are approved for posting.
 
 {company_context}
+{time_sensitivity_rule}
 
 Do NOT check word count, hashtag count, or hashtag placement -- those are already enforced separately and are guaranteed correct. Only judge what's below.
 
@@ -79,6 +84,7 @@ For each platform's caption below, check:
 2. Hashtag relevance -- are the hashtags actually relevant to this caption's content, not generic filler?
 3. Tone fit -- professional and warm, not clinical/cold, not marketing hype.
 4. Does it read like an actual social media post, not a brochure or a copy-pasted excerpt from the website?
+5. Time-sensitivity — does the caption make any same-day-relative claim (e.g. 'today's hours') rather than using explicit day labels?
 
 DRAFT TO REVIEW:
 
@@ -103,6 +109,7 @@ For each platform, decide approved (true/false) and give a specific reason -- if
 def build_critic_prompt(topic_content: str, draft: SocialPostDraft) -> str:
     return CRITIC_PROMPT_TEMPLATE.format(
         company_context=COMPANY_CONTEXT,
+        time_sensitivity_rule=TIME_SENSITIVITY_RULE,
         topic_content=topic_content,
         linkedin_caption=draft.linkedin.caption,
         linkedin_hashtags=draft.linkedin.hashtags,
@@ -117,6 +124,7 @@ def build_critic_prompt(topic_content: str, draft: SocialPostDraft) -> str:
 REVISION_PROMPT_TEMPLATE = """You are revising a set of social media captions for Trinity Tree Psychological Services, based on specific feedback from a review step. The previous attempt was rejected.
 
 {company_context}
+{time_sensitivity_rule}
 
 TOPIC CONTENT (this is the source for anything specific to this post -- do not invent services, insurance plans, credentials, ages served, or any other detail not present in this text; general facts about the practice itself, like its name and location above, are already established and don't need to come from this text):
 ---
@@ -149,6 +157,7 @@ Platform requirements, unchanged from before -- treat any violation as a failure
 def build_revision_prompt(topic_content: str, previous_draft: SocialPostDraft, verdict: CriticVerdict) -> str:
     return REVISION_PROMPT_TEMPLATE.format(
         company_context=COMPANY_CONTEXT,
+        time_sensitivity_rule=TIME_SENSITIVITY_RULE,
         topic_content=topic_content,
         linkedin_caption=previous_draft.linkedin.caption,
         instagram_caption=previous_draft.instagram.caption,
@@ -162,8 +171,6 @@ def build_revision_prompt(topic_content: str, previous_draft: SocialPostDraft, v
         platform_rules=PLATFORM_RULES,
         response_shape=RESPONSE_SHAPE,
     )
-
-import random
 
 IMAGE_STYLES = [
     "bold infographic with simple icons and clean layout",

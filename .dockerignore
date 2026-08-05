@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+.git/
+.gitignore
+__pycache__/
+*.pyc
+generated_images/
+scripts/bakeoff_results.json
+.vscode/
+.idea/
+README.md
