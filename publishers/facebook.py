@@ -148,8 +148,8 @@ def post_to_facebook(
     )
 
     logger.info(
-        f"\n[facebook] Uploading image: "
-        f"{resolved_image_path}"
+    "[facebook] Uploading image: %s",
+    resolved_image_path,
     )
 
     try:
@@ -207,20 +207,15 @@ def post_to_facebook(
         response
     )
 
-    logger.info(
-        "\n[facebook] Post published successfully."
-    )
+    logger.info("[facebook] Post published successfully")
 
-    if response_body.get("post_id"):
-        logger.info(
-            f"[facebook] Post ID: "
-            f"{response_body['post_id']}"
-        )
+    post_id = response_body.get("post_id")
+    photo_id = response_body.get("id")
 
-    if response_body.get("id"):
-        logger.info(
-            f"[facebook] Photo ID: "
-            f"{response_body['id']}"
-        )
+    if post_id:
+        logger.info("[facebook] Post ID: %s", post_id)
+
+    if photo_id:
+        logger.info("[facebook] Photo ID: %s", photo_id)
 
     return response_body
