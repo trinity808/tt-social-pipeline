@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from google.cloud import firestore
 from pipeline.prompts import format_caption
 from pipeline.secrets import _get_secret, _set_secret
+from pipeline.logging_config import get_logger
 
 load_dotenv()
 
@@ -32,6 +33,7 @@ SECRET_REFRESH_TOKEN_ID = "linkedin-refresh-token"
 
 db = firestore.Client(project=GCP_PROJECT_ID)
 TOKEN_META_DOC = db.collection("linkedin_auth").document("token_meta")
+logger = get_logger(__name__)
 
 # --- Ported from Sukanya's manual test script, unchanged in logic ---
 
@@ -123,7 +125,7 @@ def upload_image_to_linkedin(access_token: str, image_path: str | Path) -> str:
  
 REFRESH_URL = "https://www.linkedin.com/oauth/v2/accessToken"
  
- 
+
 def _handle_refresh_failure(reason: str) -> None:
     """Called when the refresh call itself fails, for any reason -- a bad
     status code or a network-level exception. Soft-fails (logs and returns)
@@ -133,9 +135,9 @@ def _handle_refresh_failure(reason: str) -> None:
     access_expires_at = doc.to_dict().get("access_token_expires_at") if doc.exists else None
  
     if access_expires_at and access_expires_at > datetime.now(timezone.utc):
-        print(
-            f"[linkedin] WARNING: token refresh failed ({reason}), "
-            f"but current access token is still valid until {access_expires_at}. Continuing."
+        logger.warning(
+            f"token refresh failed ({reason}), but current access token is "
+            f"still valid until {access_expires_at}. Continuing."
         )
         return
  
@@ -143,7 +145,7 @@ def _handle_refresh_failure(reason: str) -> None:
         f"LinkedIn token refresh failed ({reason}) and no valid access token remains."
     )
  
- 
+
 def refresh_access_token() -> None:
     """Calls LinkedIn's refresh grant endpoint, writes the new access token
     (and new refresh token, if issued) to Secret Manager, and updates both
@@ -190,14 +192,14 @@ def refresh_access_token() -> None:
     try:
         TOKEN_META_DOC.set(update_fields, merge=True)
     except Exception as e:
-        print(
-            f"[linkedin] WARNING: new tokens were saved to Secret Manager successfully, "
+        logger.warning(
+            f"new tokens were saved to Secret Manager successfully, "
             f"but updating Firestore's expiry tracking failed ({e}). The token itself is "
             f"fine -- this will just cause an unnecessary (harmless) refresh attempt next run."
         )
         return
 
-    print("[linkedin] access token refreshed successfully.")
+    logger.info("access token refreshed successfully.")
  
  
 def get_valid_access_token() -> str:
@@ -210,8 +212,8 @@ def get_valid_access_token() -> str:
     refresh_cutoff = datetime.now(timezone.utc) + timedelta(days=REFRESH_MARGIN_DAYS)
 
     if access_expires_at is None or access_expires_at < refresh_cutoff:
-        print(
-            "[linkedin] access token missing tracked expiry or within "
+        logger.info(
+            "access token missing tracked expiry or within "
             f"{REFRESH_MARGIN_DAYS}-day refresh margin -- refreshing now."
         )
         refresh_access_token()
@@ -266,5 +268,5 @@ def post_to_linkedin(caption: str, hashtags: list[str], image_path: str | Path) 
         raise RuntimeError(f"LinkedIn post failed -- status {response.status_code}: {response.text}")
 
     post_urn = response.headers.get("x-restli-id")
-    print(f"[linkedin] posted successfully. Post URN: {post_urn}")
+    logger.info(f"posted successfully. Post URN: {post_urn}")
     return post_urn

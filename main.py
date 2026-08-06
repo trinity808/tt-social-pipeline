@@ -8,13 +8,14 @@ Dockerfile/deploy command, not this file's __main__ block.
 """
 
 import os
-import traceback
 
 from flask import Flask, jsonify
 
 from pipeline.graph import build_graph
+from pipeline.logging_config import get_logger
 
 app = Flask(__name__)
+logger = get_logger(__name__)
 
 
 @app.route("/", methods=["GET"])
@@ -24,7 +25,7 @@ def health_check():
 
 @app.route("/run", methods=["POST"])
 def run_pipeline():
-    print("[main] pipeline run triggered")
+    logger.info("pipeline run triggered")
 
     try:
         graph = build_graph()
@@ -32,11 +33,10 @@ def run_pipeline():
     except Exception as e:
         # Real 500, not a 200 with an error message buried in the body --
         # Cloud Run's own logs/metrics need this to show up as a failure.
-        print(f"[main] pipeline run FAILED: {e}")
-        traceback.print_exc()  # full traceback in logs for any future failure, not just this one
+        logger.exception(f"pipeline run FAILED: {e}")
         return jsonify({"status": "failed", "error": str(e)}), 500
 
-    print(f"[main] pipeline run completed for topic '{result.get('topic_key')}'")
+    logger.info(f"pipeline run completed for topic '{result.get('topic_key')}'")
 
     return jsonify({
         "status": "completed",
