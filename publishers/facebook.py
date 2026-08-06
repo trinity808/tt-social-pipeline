@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Sequence
 
 import requests
+from pipeline.logging_config import get_logger
 from dotenv import load_dotenv
 from pipeline.prompts import format_caption
 from pipeline.secrets import _get_secret
@@ -18,6 +19,8 @@ from pipeline.meta_errors import MetaAuthenticationError, MetaPermissionError, M
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_ROOT / ".env")
+
+logger = get_logger(__name__)
 
 GCP_PROJECT_ID = os.getenv(
     "GCP_PROJECT_ID",
@@ -144,7 +147,7 @@ def post_to_facebook(
         or "application/octet-stream"
     )
 
-    print(
+    logger.info(
         f"\n[facebook] Uploading image: "
         f"{resolved_image_path}"
     )
@@ -204,18 +207,18 @@ def post_to_facebook(
         response
     )
 
-    print(
+    logger.info(
         "\n[facebook] Post published successfully."
     )
 
     if response_body.get("post_id"):
-        print(
+        logger.info(
             f"[facebook] Post ID: "
             f"{response_body['post_id']}"
         )
 
     if response_body.get("id"):
-        print(
+        logger.info(
             f"[facebook] Photo ID: "
             f"{response_body['id']}"
         )
