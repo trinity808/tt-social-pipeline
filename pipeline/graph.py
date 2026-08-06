@@ -5,12 +5,14 @@ from langgraph.graph import END, StateGraph
 from agents.critic import critique_draft
 from agents.writer import draft_post, revise_post
 from agents.image_generator import generate_post_image
-
+from pipeline.logging_config import get_logger
 from pipeline.state import PipelineState
 from pipeline.rotation import record_topic_used, select_topic
 
 CONTENT_PATH = "content/site_content.json"
 MAX_RETRIES = 1  # 1 retry = 2 total writer attempts before giving up
+
+logger = get_logger(__name__)
 
 
 def load_topic(state: PipelineState) -> dict:
@@ -20,7 +22,7 @@ def load_topic(state: PipelineState) -> dict:
     if auto_selected:
         topic_key = select_topic()
 
-    print(f"[load_topic] loading '{topic_key}'{' (auto-selected)' if auto_selected else ''}...")
+    logger.info(f"loading '{topic_key}'{' (auto-selected)' if auto_selected else ''}...")
 
     with open(CONTENT_PATH, "r", encoding="utf-8") as f:
         content = json.load(f)
@@ -30,45 +32,45 @@ def load_topic(state: PipelineState) -> dict:
 
     return {"topic_key": topic_key, "topic_content": content[topic_key]}
 
+
 def generate_image(state: PipelineState) -> dict:
     draft = state.get("draft")
-
     if draft is None:
         raise ValueError(
             "A completed social-media draft is required "
             "before generating an image."
         )
-
+    logger.info("generating image...")
     image_path = generate_post_image(
         topic_key=state["topic_key"],
         topic_content=state["topic_content"],
         # The Instagram caption is concise and works well as visual context.
         caption=draft.instagram.caption,
     )
-
+    logger.info(f"image saved to: {image_path}")
     return {
         "image_path": image_path,
     }
 
 
 def draft(state: PipelineState) -> dict:
-    print("[draft] generating initial draft...")
+    logger.info("generating initial draft...")
     result = draft_post(state["topic_content"])
-    print(f"[draft] initial draft:\n{result.model_dump_json(indent=2)}\n")
+    logger.info(f"initial draft:\n{result.model_dump_json(indent=2)}")
     return {"draft": result}
 
 
 def critic(state: PipelineState) -> dict:
-    print("[critic] reviewing draft...")
+    logger.info("reviewing draft...")
     verdict = critique_draft(state["topic_content"], state["draft"])
-    print(f"[critic] verdict:\n{verdict.model_dump_json(indent=2)}\n")
+    logger.info(f"verdict:\n{verdict.model_dump_json(indent=2)}")
     return {"verdict": verdict}
 
 
 def revise(state: PipelineState) -> dict:
-    print("[revise] regenerating based on critic feedback...")
+    logger.info("regenerating based on critic feedback...")
     new_draft = revise_post(state["topic_content"], state["draft"], state["verdict"])
-    print(f"[revise] revised draft:\n{new_draft.model_dump_json(indent=2)}\n")
+    logger.info(f"revised draft:\n{new_draft.model_dump_json(indent=2)}")
     return {
         "draft": new_draft,
         "retry_count": state.get("retry_count", 0) + 1,
@@ -101,9 +103,7 @@ def build_graph():
     graph.add_node("generate_image", generate_image)
 
     graph.set_entry_point("load_topic")
-
     graph.add_edge("load_topic", "draft")
-
     graph.add_edge("draft", "critic")
     graph.add_conditional_edges("critic", route_after_critic, {"revise": "revise", "end": "generate_image"})
     graph.add_edge("revise", "critic")
@@ -113,8 +113,10 @@ def build_graph():
 
 
 if __name__ == "__main__":
+    # Local-only debug tool -- never runs inside Cloud Run, so it stays
+    # plain print() rather than structured logging, same reasoning as
+    # everything under scripts/.
     app = build_graph()
-
     result = app.invoke({})
 
     print("Final verdict:")

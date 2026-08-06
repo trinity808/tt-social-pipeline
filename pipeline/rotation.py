@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from google.cloud import firestore
+from pipeline.logging_config import get_logger
 
 load_dotenv()
 
@@ -13,6 +14,7 @@ COLLECTION = "topics"
 RECENCY_WINDOW_DAYS = 7
 
 db = firestore.Client(project=os.environ["GCP_PROJECT_ID"])
+logger = get_logger(__name__)
 
 
 def _all_topic_keys() -> list[str]:
@@ -54,8 +56,8 @@ def select_topic() -> str:
 
 
 def record_topic_used(topic_key: str) -> None:
-    print(f"[rotation] writing last_used for '{topic_key}'...")
+    logger.info(f"writing last_used for '{topic_key}'...")
     db.collection(COLLECTION).document(topic_key).set(
         {"last_used": datetime.now(timezone.utc)}
     )
-    print(f"[rotation] write completed for '{topic_key}'")
+    logger.info(f"write completed for '{topic_key}'")
