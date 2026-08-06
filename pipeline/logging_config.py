@@ -20,6 +20,7 @@ class CloudRunJsonFormatter(logging.Formatter):
         entry = {
             "severity": record.levelname,
             "message": record.getMessage(),
+            "logger": record.name,
             "time": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
         }
         if record.exc_info:
