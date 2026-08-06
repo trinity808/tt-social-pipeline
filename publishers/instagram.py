@@ -10,13 +10,14 @@ a public URL Instagram's servers can actually fetch.
 
 import mimetypes
 import os
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 from google.cloud import storage
 import requests
-import time
 
+from pipeline.logging_config import get_logger
 from pipeline.meta_errors import parse_meta_response
 from pipeline.prompts import format_caption
 from pipeline.secrets import _get_secret
@@ -26,11 +27,13 @@ load_dotenv()
 GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 GCS_BUCKET_NAME = "tt-social-pipeline-images"
 
-GRAPH_API_VERSION = "v25.0"
-
 storage_client = storage.Client(project=GCP_PROJECT_ID)
 
+GRAPH_API_VERSION = "v25.0"
+
 INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "").strip()
+
+logger = get_logger(__name__)
 
 
 def upload_image_to_gcs(image_path: str | Path) -> str:
@@ -45,7 +48,9 @@ def upload_image_to_gcs(image_path: str | Path) -> str:
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     blob.upload_from_filename(str(path), content_type=content_type)
 
+    logger.info(f"image uploaded to Cloud Storage: {blob.public_url}")
     return blob.public_url
+
 
 def create_media_container(ig_user_id: str, image_url: str, caption: str, access_token: str) -> str:
     """Stages an image + caption for publishing. Returns a container ID --
@@ -65,12 +70,15 @@ def create_media_container(ig_user_id: str, image_url: str, caption: str, access
     if not container_id:
         raise RuntimeError(f"Instagram did not return a container ID. Response: {response_body}")
 
+    logger.info(f"media container created: {container_id}")
     return container_id
 
 
 def wait_for_container_status(container_id: str, access_token: str) -> None:
     """Polls until the container is ready to publish. Same waiting pattern
     as LinkedIn's image upload check, just a different status field."""
+    logger.info(f"waiting for container {container_id} to finish processing...")
+
     for attempt in range(1, 61):
         response = requests.get(
             f"https://graph.facebook.com/{GRAPH_API_VERSION}/{container_id}",
@@ -82,6 +90,7 @@ def wait_for_container_status(container_id: str, access_token: str) -> None:
         status = response_body.get("status_code")
 
         if status == "FINISHED":
+            logger.info(f"container {container_id} ready to publish")
             return
         if status in {"ERROR", "EXPIRED"}:
             raise RuntimeError(f"Instagram container processing failed with status: {status}")
@@ -109,7 +118,9 @@ def publish_container(ig_user_id: str, container_id: str, access_token: str) -> 
     if not media_id:
         raise RuntimeError(f"Instagram did not return a published media ID. Response: {response_body}")
 
+    logger.info(f"posted successfully. Media ID: {media_id}")
     return media_id
+
 
 def publish_to_instagram(caption: str, hashtags: list[str], image_path: str | Path) -> str:
     """Publishes an approved caption + image to Instagram. Returns the
