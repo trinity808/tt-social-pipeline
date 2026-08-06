@@ -1,6 +1,9 @@
 # --- Local config ---
 python-dotenv
 
+# --- Cross-platform timezone data ---
+tzdata
+
 # --- Content fetch (Phase 0) ---
 requests
 beautifulsoup4
