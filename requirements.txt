@@ -13,6 +13,7 @@ pydantic
 
 # --- Orchestration (Phase 1-3) ---
 langgraph
+langgraph-checkpoint-firestore
 
 # --- LLM providers ---
 openai          # DALL-E 3 image gen, and Vertex's OpenAI-compatible Gemini endpoint (same pattern as DebateClub)
