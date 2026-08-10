@@ -13,6 +13,7 @@ from flask import Flask, jsonify
 
 from pipeline.graph import build_graph
 from pipeline.logging_config import get_logger
+from pipeline.run_lock import acquire_run_lock, release_run_lock
 
 app = Flask(__name__)
 logger = get_logger(__name__)
@@ -25,16 +26,19 @@ def health_check():
 
 @app.route("/run", methods=["POST"])
 def run_pipeline():
+    if not acquire_run_lock():
+        return jsonify({"status": "skipped", "reason": "another run is already in progress"}), 409
+
     logger.info("pipeline run triggered")
 
     try:
         graph = build_graph()
         result = graph.invoke({})
     except Exception as e:
-        # Real 500, not a 200 with an error message buried in the body --
-        # Cloud Run's own logs/metrics need this to show up as a failure.
         logger.exception(f"pipeline run FAILED: {e}")
         return jsonify({"status": "failed", "error": str(e)}), 500
+    finally:
+        release_run_lock()
 
     logger.info(f"pipeline run completed for topic '{result.get('topic_key')}'")
 
