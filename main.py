@@ -8,6 +8,7 @@ Dockerfile/deploy command, not this file's __main__ block.
 """
 
 import os
+import uuid
 
 from flask import Flask, jsonify
 
@@ -29,21 +30,31 @@ def run_pipeline():
     if not acquire_run_lock():
         return jsonify({"status": "skipped", "reason": "another run is already in progress"}), 409
 
-    logger.info("pipeline run triggered")
+    thread_id = str(uuid.uuid4())
+    logger.info(f"pipeline run triggered (thread {thread_id})")
 
     try:
         graph = build_graph()
-        result = graph.invoke({})
+        result = graph.invoke({}, config={"configurable": {"thread_id": thread_id}})
     except Exception as e:
         logger.exception(f"pipeline run FAILED: {e}")
         return jsonify({"status": "failed", "error": str(e)}), 500
     finally:
         release_run_lock()
 
+    if "__interrupt__" in result:
+        logger.info(f"pipeline run paused for review (thread {thread_id})")
+        return jsonify({
+            "status": "awaiting_review",
+            "thread_id": thread_id,
+            "topic_key": result.get("topic_key"),
+        }), 200
+    
     logger.info(f"pipeline run completed for topic '{result.get('topic_key')}'")
 
     return jsonify({
         "status": "completed",
+        "thread_id": thread_id,
         "topic_key": result.get("topic_key"),
         "retries_used": result.get("retry_count", 0),
         "image_path": result.get("image_path"),
