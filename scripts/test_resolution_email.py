@@ -10,16 +10,21 @@ TOPIC_KEY = "psychological_evaluations"
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in {2, 3}:
         print(
             "Usage:\n"
             "  python -m scripts.test_resolution_email "
-            "<approve|reject> <resolver_email>"
+            "<approve|reject> [resolver_email]"
         )
         raise SystemExit(1)
 
     decision = sys.argv[1].strip().lower()
-    resolver_email = sys.argv[2].strip()
+
+    resolver_email = (
+        sys.argv[2].strip()
+        if len(sys.argv) == 3
+        else None
+    )
 
     if decision not in {"approve", "reject"}:
         print(
@@ -31,7 +36,10 @@ def main() -> None:
     print("Testing review resolution notification")
     print("--------------------------------------")
     print(f"Decision: {decision}")
-    print(f"Resolved by: {resolver_email}")
+    print(
+        f"Resolved by: "
+        f"{resolver_email or 'Not provided'}"
+    )
     print()
 
     send_resolution_email(
@@ -45,9 +53,16 @@ def main() -> None:
     print(
         f"{decision.upper()} notification sent successfully."
     )
-    print(
-        "Check that ONLY the other reviewer received the email."
-    )
+
+    if resolver_email:
+        print(
+            "The resolver was excluded from the notification."
+        )
+    else:
+        print(
+            "No resolver email was provided, so the resolution "
+            "notification was sent using the default recipients."
+        )
 
 
 if __name__ == "__main__":

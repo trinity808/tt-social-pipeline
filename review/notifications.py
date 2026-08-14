@@ -70,7 +70,7 @@ def build_review_links(
 
     decision_path = os.getenv(
         "REVIEW_DECISION_PATH",
-        "/review/decision",
+        "/review",
     ).strip()
 
     if not decision_path.startswith("/"):
@@ -79,14 +79,14 @@ def build_review_links(
     approve_query = urlencode(
         {
             "thread_id": thread_id,
-            "decision": "approve",
+            "decision": "approved",
         }
     )
 
     reject_query = urlencode(
         {
             "thread_id": thread_id,
-            "decision": "reject",
+            "decision": "rejected",
         }
     )
 
