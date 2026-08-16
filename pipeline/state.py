@@ -67,3 +67,8 @@ class PipelineState(TypedDict):
     verdict: Optional[CriticVerdict]
     retry_count: int
     review_decision: Optional[str]
+    image_path: Optional[str]
+    image_url: Optional[str]
+    cadence_eligibility: Optional[dict]
+    publish_results: Optional[dict]
+    pending_check_result: Optional[str]
