@@ -8,48 +8,23 @@ job is bridging that gap: take a locally-saved generated image and produce
 a public URL Instagram's servers can actually fetch.
 """
 
-import mimetypes
 import os
 import time
 from pathlib import Path
 
-from dotenv import load_dotenv
-from google.cloud import storage
 import requests
 
 from pipeline.logging_config import get_logger
 from pipeline.meta_errors import parse_meta_response
 from pipeline.prompts import format_caption
 from pipeline.secrets import _get_secret
-
-load_dotenv()
-
-GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
-GCS_BUCKET_NAME = "tt-social-pipeline-images"
-
-storage_client = storage.Client(project=GCP_PROJECT_ID)
+from pipeline.storage import upload_image_to_gcs
 
 GRAPH_API_VERSION = "v25.0"
 
 INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "").strip()
 
 logger = get_logger(__name__)
-
-
-def upload_image_to_gcs(image_path: str | Path) -> str:
-    """Uploads a local image to Cloud Storage and returns its public URL."""
-    path = Path(image_path)
-    if not path.is_file():
-        raise FileNotFoundError(f"Generated image was not found: {path}")
-
-    bucket = storage_client.bucket(GCS_BUCKET_NAME)
-    blob = bucket.blob(path.name)
-
-    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    blob.upload_from_filename(str(path), content_type=content_type)
-
-    logger.info(f"image uploaded to Cloud Storage: {blob.public_url}")
-    return blob.public_url
 
 
 def create_media_container(ig_user_id: str, image_url: str, caption: str, access_token: str) -> str:

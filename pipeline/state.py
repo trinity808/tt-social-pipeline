@@ -1,6 +1,6 @@
 import json
+from typing import Optional, TypedDict, TypeVar
 
-from typing import Optional, TypedDict,NotRequired,TypeVar
 from pydantic import BaseModel, Field
 
 
@@ -66,6 +66,9 @@ class PipelineState(TypedDict):
     draft: Optional[SocialPostDraft]
     verdict: Optional[CriticVerdict]
     retry_count: int
-    image_prompt: NotRequired[str]
-    image_path: NotRequired[str]
-
+    review_decision: Optional[str]
+    image_path: Optional[str]
+    image_url: Optional[str]
+    cadence_eligibility: Optional[dict]
+    publish_results: Optional[dict]
+    pending_check_result: Optional[str]

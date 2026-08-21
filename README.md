@@ -36,3 +36,31 @@ https://graph.facebook.com/v25.0/{FACEBOOK_PAGE_ID}?fields=access_token&access_t
 
    The `access_token` field in that response is the real, `"type": "PAGE"` token — that's what goes into Secret Manager (`meta-access-token`), not the System User token itself.
 3. Confirm with `debug_token` again before trusting it — should show `"type": "PAGE"` and both expiry fields still at `0`.
+
+## Phase 5: human review gate
+
+Full design (recipient model, approval mechanics, cadence-lock rule) lives in `phase5-review-gate-design.md`. This section covers operational knowledge for whoever maintains this later.
+
+**Checkpointer setup is not straightforward -- `FirestoreSaver` cannot be instantiated directly.** Its constructor doesn't accept the same keyword arguments as its own `from_conn_info()` classmethod (confirmed by hitting a real `TypeError` testing this). The working pattern, used in `pipeline/graph.py`:
+```python
+checkpointer = FirestoreSaver.from_conn_info(
+    project_id=GCP_PROJECT_ID,
+    checkpoints_collection="checkpoints",
+    writes_collection="checkpoint_writes",
+).__enter__()
+```
+Calling `.__enter__()` manually (rather than a `with` block) keeps the checkpointer open for the module's lifetime -- a `with` block would close it the moment `build_graph()` returns, breaking every request after the first.
+
+**Known, accepted limitation: the msgpack deserialization warning cannot currently be silenced.** LangGraph warns on every resume that `pipeline.state.SocialPostDraft`/`CriticVerdict` are "unregistered types" (related to CVE-2026-28277, unrestricted checkpoint deserialization). We attempted the documented fix -- passing an explicit `allowed_msgpack_modules` allowlist via a custom `JsonPlusSerializer` -- but it does not appear to actually take effect with this package's current version; the warning still fires. Left in place since it's harmless and may start working if the package updates. Real exposure requires write access to our Firestore checkpoint store, which is already tightly IAM-restricted.
+
+**Idempotency requirement:** any code before an `interrupt()` call inside the same node re-executes in full on every resume. This is why the review gate is split into two nodes (`send_for_review` completes once and sends the email; `await_approval` contains only the `interrupt()` call) rather than one.
+
+**Pending-review resolution is atomic, not read-then-write.** `resolve_pending_review()` uses a Firestore transaction to check status and mark it resolved in one step -- required for "first click wins" to actually hold under near-simultaneous clicks, same race-condition class as the run-lock fix.
+
+**Supersede/skip logic runs at the very start of every pipeline invocation**, before any generation happens. A still-pending review within 48 hours causes the run to skip entirely (zero cost); a stale one gets marked `superseded` and the run proceeds. Tested by manually backdating a `pending_reviews` document's `generated_at` field in the Firestore console -- there's no way to trigger this via real elapsed time in dev testing.
+
+**Two features are stubbed pending confirmation, not fully built:**
+- 24-hour nudge reminders (`send_review_followup_email` already exists in `review/notifications.py` and works, but nothing currently calls it) -- pending Dr. Shelton confirming whether it's wanted at all.
+- Superseded-thread notifications -- currently just a log line; `review/notifications.py` has no function for this decision type yet (`send_resolution_email` only supports approve/reject).
+
+**`/review` is currently locked down the same way as `/run`** (`--no-allow-unauthenticated`). This works for local testing (both of us running on the same machine) but will not work in production -- a real reviewer clicking from their own device has no way to attach an auth token. Before going live: `/review` needs to allow public access while `/run` stays locked to Cloud Scheduler only, and `REVIEW_PUBLIC_BASE_URL` needs to point at the real deployed URL instead of `localhost:8080`.

@@ -8,12 +8,17 @@ Dockerfile/deploy command, not this file's __main__ block.
 """
 
 import os
+import uuid
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 from pipeline.graph import build_graph
 from pipeline.logging_config import get_logger
 from pipeline.run_lock import acquire_run_lock, release_run_lock
+from pipeline.review import resolve_pending_review
+from review.notifications import send_resolution_email
+
+from langgraph.types import Command
 
 app = Flask(__name__)
 logger = get_logger(__name__)
@@ -29,26 +34,77 @@ def run_pipeline():
     if not acquire_run_lock():
         return jsonify({"status": "skipped", "reason": "another run is already in progress"}), 409
 
-    logger.info("pipeline run triggered")
+    thread_id = str(uuid.uuid4())
+    logger.info(f"pipeline run triggered (thread {thread_id})")
 
     try:
         graph = build_graph()
-        result = graph.invoke({})
+        result = graph.invoke({}, config={"configurable": {"thread_id": thread_id}})
     except Exception as e:
         logger.exception(f"pipeline run FAILED: {e}")
         return jsonify({"status": "failed", "error": str(e)}), 500
     finally:
         release_run_lock()
 
+    if "__interrupt__" in result:
+        logger.info(f"pipeline run paused for review (thread {thread_id})")
+        return jsonify({
+            "status": "awaiting_review",
+            "thread_id": thread_id,
+            "topic_key": result.get("topic_key"),
+        }), 200
+    
     logger.info(f"pipeline run completed for topic '{result.get('topic_key')}'")
 
     return jsonify({
         "status": "completed",
+        "thread_id": thread_id,
         "topic_key": result.get("topic_key"),
         "retries_used": result.get("retry_count", 0),
         "image_path": result.get("image_path"),
     }), 200
 
+
+@app.route("/review", methods=["GET"])
+def review_decision():
+    thread_id = request.args.get("thread_id")
+    decision = request.args.get("decision")
+
+    if not thread_id or decision not in ("approved", "rejected"):
+        return jsonify({"status": "invalid_request"}), 400
+
+    record = resolve_pending_review(thread_id, decision)
+
+    if record is None:
+        logger.warning(f"review link for thread {thread_id} was invalid or already actioned")
+        return jsonify({"status": "already_actioned_or_invalid"}), 409
+
+    logger.info(f"resuming thread {thread_id} with decision: {decision}")
+
+    try:
+        graph = build_graph()
+        result = graph.invoke(Command(resume=decision), config={"configurable": {"thread_id": thread_id}})
+    except Exception as e:
+        logger.exception(f"failed to resume thread {thread_id}: {e}")
+        return jsonify({"status": "failed", "error": str(e)}), 500
+
+    logger.info(f"review for thread {thread_id} resolved as {decision}")
+
+    try:
+        send_resolution_email(
+            thread_id=thread_id,
+            topic_key=result.get("topic_key", ""),
+            decision=decision,
+        )
+    except Exception as e:
+        logger.warning(f"resolution email failed to send for thread {thread_id}: {e}")
+
+    return jsonify({
+        "status": "resolved",
+        "thread_id": thread_id,
+        "decision": decision,
+        "topic_key": result.get("topic_key"),
+    }), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
