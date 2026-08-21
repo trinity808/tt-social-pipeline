@@ -193,7 +193,6 @@ IMAGE_COLOR_PALETTES = [
     "terracotta wellness -- ivory, muted terracotta, dusty olive, clay beige, and soft moss",
     "sage and sunrise -- cream, eucalyptus green, warm apricot, soft golden yellow, and light stone",
     "soft botanical neutrals -- warm cream, muted sage, olive green, pale butter yellow, and light sand",
-    "earthy calm -- off-white, moss green, muted rust, warm taupe, and pale oat",
     "forest and gold -- deep forest green, sage green, warm gold accent, cream, and soft moss",
 ]
 
@@ -224,8 +223,10 @@ Topic:
 Approved website information:
 {source_excerpt}
 
-Related social-media caption:
-{caption_excerpt}
+Related social-media captions (use these to inform which items to prioritize -- see CONTENT PRIORITY below):
+LinkedIn: {linkedin_caption_excerpt}
+Instagram: {instagram_caption_excerpt}
+Facebook: {facebook_caption_excerpt}
 
 Style: {style}
 Color palette: {color_palette}
@@ -236,6 +237,7 @@ CONTENT PRIORITY:
 - Focus on ONE primary idea from the topic.
 - Use the approved website information for factual grounding.
 - If the topic naturally involves a list of related items (services, conditions, contact details, hours), you may include the full accurate list -- but each item must be represented with minimal weight: a short icon and a brief single-line label, never a multi-line description, heading-plus-subheading pair, or explanatory sentence per item.
+- If the topic naturally involves a list of more than a few items, select approximately 6-7 for the image -- not the full list, but more than any single platform caption includes. Always include every item mentioned across the three captions above. Fill any remaining slots with other genuinely relevant items from the approved website information.
 - Do not invent, embellish, or elaborate on any single item beyond what's needed to name it clearly.
 - Prefer visual simplicity over completeness -- if a full list cannot be shown this lightly without crowding the canvas or losing legibility, select only the most relevant items instead.
 - Leave elaboration and explanation for the accompanying social-media caption; the image should name things, not explain them.
@@ -282,18 +284,20 @@ Create a polished social-media graphic that communicates one clear idea rather t
 """
 
 
-def build_image_prompt(topic_key: str, topic_content: str, caption: str) -> str:
-    # NOTE: still takes a single caption (Instagram's, per graph.py's
-    # current call site) -- the caption-consistency question (should the
-    # image prioritize items mentioned across all three platform captions,
-    # not just one) is a pending decision, not yet implemented. If that
-    # gets approved, this signature needs to change to accept all three.
+def build_image_prompt(
+    topic_key: str,
+    topic_content: str,
+    linkedin_caption: str,
+    instagram_caption: str,
+    facebook_caption: str,
+) -> str:
     source_excerpt = " ".join(topic_content.split())[:3500]
-    caption_excerpt = " ".join(caption.split())[:1000]
     return IMAGE_PROMPT_TEMPLATE.format(
         topic_key=topic_key,
         source_excerpt=source_excerpt,
-        caption_excerpt=caption_excerpt,
+        linkedin_caption_excerpt=" ".join(linkedin_caption.split()),
+        instagram_caption_excerpt=" ".join(instagram_caption.split()),
+        facebook_caption_excerpt=" ".join(facebook_caption.split()),
         style=random.choice(IMAGE_STYLES),
         color_palette=random.choice(IMAGE_COLOR_PALETTES),
         layout=random.choice(IMAGE_LAYOUTS),

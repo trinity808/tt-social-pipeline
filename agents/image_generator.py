@@ -18,7 +18,13 @@ load_dotenv()
 OUTPUT_DIRECTORY = Path("generated_images")
 
 
-def generate_post_image(topic_key: str, topic_content: str, caption: str) -> str:
+def generate_post_image(
+    topic_key: str,
+    topic_content: str,
+    linkedin_caption: str,
+    instagram_caption: str,
+    facebook_caption: str,
+) -> str:
     """Generate one image, save it locally, and return its path."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -30,7 +36,9 @@ def generate_post_image(topic_key: str, topic_content: str, caption: str) -> str
     prompt = build_image_prompt(
         topic_key=topic_key,
         topic_content=topic_content,
-        caption=caption,
+        linkedin_caption=linkedin_caption,
+        instagram_caption=instagram_caption,
+        facebook_caption=facebook_caption,
     )
 
     response = client.images.generate(
