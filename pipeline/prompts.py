@@ -172,6 +172,25 @@ def build_revision_prompt(topic_content: str, previous_draft: SocialPostDraft, v
         response_shape=RESPONSE_SHAPE,
     )
 
+# Determined via a one-time offline classification (scripts/classify_topic_
+# list_length.py), not computed live per run -- topic content is static, so
+# this only needs updating manually if a topic's content changes
+# significantly or a new topic is added. Used below to exclude grid-style
+# layouts for topics with many enumerable items, avoiding the silent
+# partial-list problem found in testing.
+TOPICS_WITH_LONG_LISTS = {
+    "about",
+    "faqs",
+    "home",
+    "insurance_payments",
+    "psychiatry_medication",
+    "psychological_evaluations",
+    "softwave_trt",
+    "speech_language",
+    "students",
+    "therapeutic_services",
+}
+
 IMAGE_STYLES = [
     "bold infographic with simple icons and clean layout",
     "clean minimalist poster with soft geometric shapes and gentle texture",
@@ -196,14 +215,17 @@ IMAGE_COLOR_PALETTES = [
     "forest and gold -- deep forest green, sage green, warm gold accent, cream, and soft moss",
 ]
 
+# Structural risk, confirmed in testing: this layout pushes toward fewer,
+# heavier items rather than a long list shown lightly -- silently dropped
+# 6 of 10 items on a long-list topic with no indication anything was
+# omitted. Excluded from the pool specifically for topics in
+# TOPICS_WITH_LONG_LISTS (see build_image_prompt below); still available
+# for everything else.
+GRID_LAYOUT = "structured grid layout with clear rows and columns for icon-based information"
+
 IMAGE_LAYOUTS = [
     "radial infographic layout with a central focal circle and surrounding information blocks",
-    # KNOWN ISSUE, not yet fixed: this layout structurally pushes toward
-    # fewer, heavier items (each one its own card) rather than a long list
-    # shown lightly -- tested on a 10-item topic and it silently dropped 6
-    # of them with no indication anything was omitted. Pending a decision
-    # on whether to exclude this layout for long-list topics specifically.
-    "structured grid layout with clear rows and columns for icon-based information",
+    GRID_LAYOUT,
     "arched poster layout with stacked sections and soft geometric framing",
     "organic landscape infographic layout with flowing bands, embedded icons, and one large focal area",
 ]
@@ -292,6 +314,13 @@ def build_image_prompt(
     facebook_caption: str,
 ) -> str:
     source_excerpt = " ".join(topic_content.split())[:3500]
+
+    available_layouts = IMAGE_LAYOUTS
+    if topic_key in TOPICS_WITH_LONG_LISTS:
+        available_layouts = [layout for layout in IMAGE_LAYOUTS if layout != GRID_LAYOUT]
+
+    chosen_layout = random.choice(available_layouts)
+
     return IMAGE_PROMPT_TEMPLATE.format(
         topic_key=topic_key,
         source_excerpt=source_excerpt,
@@ -300,7 +329,7 @@ def build_image_prompt(
         facebook_caption_excerpt=" ".join(facebook_caption.split()),
         style=random.choice(IMAGE_STYLES),
         color_palette=random.choice(IMAGE_COLOR_PALETTES),
-        layout=random.choice(IMAGE_LAYOUTS),
+        layout=chosen_layout,
         graphic_treatment=random.choice(IMAGE_GRAPHIC_TREATMENTS),
     ).strip()
 
