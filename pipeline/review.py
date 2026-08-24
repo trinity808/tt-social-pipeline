@@ -14,6 +14,7 @@ from google.cloud import firestore
 
 from pipeline.cadence import should_post_today
 from pipeline.logging_config import get_logger
+from review.notifications import send_supersede_email
 
 from dotenv import load_dotenv
 
@@ -103,7 +104,17 @@ def check_and_resolve_stale_review() -> str:
             logger.info(f"pending review {doc.id} still within expiry window -- skipping this run")
         else:
             doc.reference.update({"status": "superseded"})
-            logger.info(f"pending review {doc.id} superseded after {age} -- clearing stale entry")
-            logger.info(f"[STUB] would notify recipients that thread {doc.id} was superseded")
+
+            try:
+                send_supersede_email(
+                    thread_id=doc.id,
+                    topic_key=record["topic_key"],
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to send supersede email for thread %s",
+                    doc.id,
+                    exc_info=True,
+                )
 
     return "skip" if any_still_valid else "proceed"
