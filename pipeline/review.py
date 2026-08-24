@@ -108,7 +108,7 @@ def check_and_resolve_stale_review() -> str:
             try:
                 send_supersede_email(
                     thread_id=doc.id,
-                    topic_key=topic_key,
+                    topic_key=record["topic_key"],
                 )
             except Exception:
                 logger.warning(
