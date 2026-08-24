@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 
 from pipeline.logging_config import get_logger
-from pipeline.meta_errors import parse_meta_response
+from pipeline.meta_errors import parse_meta_response, MetaTemporaryError
 from pipeline.prompts import format_caption
 from pipeline.secrets import _get_secret
 from pipeline.storage import upload_image_to_gcs
@@ -30,15 +30,19 @@ logger = get_logger(__name__)
 def create_media_container(ig_user_id: str, image_url: str, caption: str, access_token: str) -> str:
     """Stages an image + caption for publishing. Returns a container ID --
     nothing is actually live yet until publish_container() is called."""
-    response = requests.post(
-        f"https://graph.facebook.com/{GRAPH_API_VERSION}/{ig_user_id}/media",
-        data={
-            "image_url": image_url,
-            "caption": caption,
-            "access_token": access_token,
-        },
-        timeout=30,
-    )
+    try:
+        response = requests.post(
+            f"https://graph.facebook.com/{GRAPH_API_VERSION}/{ig_user_id}/media",
+            data={
+                "image_url": image_url,
+                "caption": caption,
+                "access_token": access_token,
+            },
+            timeout=30,
+        )
+    except (requests.Timeout, requests.ConnectionError) as e:
+        raise MetaTemporaryError(f"Network error while creating media container: {e}") from e
+
     response_body = parse_meta_response(response)
 
     container_id = response_body.get("id")
@@ -55,11 +59,15 @@ def wait_for_container_status(container_id: str, access_token: str) -> None:
     logger.info(f"waiting for container {container_id} to finish processing...")
 
     for attempt in range(1, 61):
-        response = requests.get(
-            f"https://graph.facebook.com/{GRAPH_API_VERSION}/{container_id}",
-            params={"fields": "status_code", "access_token": access_token},
-            timeout=30,
-        )
+        try:
+            response = requests.get(
+                f"https://graph.facebook.com/{GRAPH_API_VERSION}/{container_id}",
+                params={"fields": "status_code", "access_token": access_token},
+                timeout=30,
+            )
+        except (requests.Timeout, requests.ConnectionError) as e:
+            raise MetaTemporaryError(f"Network error while checking container status: {e}") from e
+
         response_body = parse_meta_response(response)
 
         status = response_body.get("status_code")
@@ -79,14 +87,18 @@ def wait_for_container_status(container_id: str, access_token: str) -> None:
 
 def publish_container(ig_user_id: str, container_id: str, access_token: str) -> str:
     """Actually publishes a ready container. Returns the published media ID."""
-    response = requests.post(
-        f"https://graph.facebook.com/{GRAPH_API_VERSION}/{ig_user_id}/media_publish",
-        data={
-            "creation_id": container_id,
-            "access_token": access_token,
-        },
-        timeout=30,
-    )
+    try:
+        response = requests.post(
+            f"https://graph.facebook.com/{GRAPH_API_VERSION}/{ig_user_id}/media_publish",
+            data={
+                "creation_id": container_id,
+                "access_token": access_token,
+            },
+            timeout=30,
+        )
+    except (requests.Timeout, requests.ConnectionError) as e:
+        raise MetaTemporaryError(f"Network error while publishing container: {e}") from e
+
     response_body = parse_meta_response(response)
 
     media_id = response_body.get("id")

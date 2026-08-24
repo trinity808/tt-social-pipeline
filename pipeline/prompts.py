@@ -172,18 +172,69 @@ def build_revision_prompt(topic_content: str, previous_draft: SocialPostDraft, v
         response_shape=RESPONSE_SHAPE,
     )
 
+# Determined via a one-time offline classification (scripts/classify_topic_
+# list_length.py), not computed live per run -- topic content is static, so
+# this only needs updating manually if a topic's content changes
+# significantly or a new topic is added. Used below to exclude grid-style
+# layouts for topics with many enumerable items, avoiding the silent
+# partial-list problem found in testing.
+TOPICS_WITH_LONG_LISTS = {
+    "about",
+    "faqs",
+    "home",
+    "insurance_payments",
+    "psychiatry_medication",
+    "psychological_evaluations",
+    "softwave_trt",
+    "speech_language",
+    "students",
+    "therapeutic_services",
+}
+
 IMAGE_STYLES = [
     "bold infographic with simple icons and clean layout",
-    "clean minimalist poster with abstract geometric shapes",
-    "typographic design with decorative geometric elements",
-    "gentle illustrated scene with soft abstract shapes",
+    "clean minimalist poster with soft geometric shapes and gentle texture",
+    "typographic editorial design with decorative geometric elements",
+    "gentle illustrated infographic with structured content zones and abstract shapes",
 ]
 
+# Status as of this commit, for PM visibility:
+# - terracotta wellness, sage and sunrise: validated across multiple tests,
+#   confirmed good.
+# - soft botanical neutrals, earthy calm: carried over from an earlier,
+#   flawed test (four palettes generated together in one ungrouped grid --
+#   no reliable way to attribute which result came from which name).
+#   Genuinely untested individually. Pending a proper isolated retest.
+# - forest and gold: new, not yet tested at all. Proposed since Trinity
+#   Tree's own branding (name, logo) is already tree/green-forward, and
+#   none of the current options lean into that directly.
 IMAGE_COLOR_PALETTES = [
-    "warm earthy tones -- terracotta, cream, olive",
-    "cool professional -- navy, white, soft blue",
-    "bold high contrast -- deep teal, bright white, coral accent",
-    "dark professional -- charcoal, gold, white",
+    "terracotta wellness -- ivory, muted terracotta, dusty olive, clay beige, and soft moss",
+    "sage and sunrise -- cream, eucalyptus green, warm apricot, soft golden yellow, and light stone",
+    "soft botanical neutrals -- warm cream, muted sage, olive green, pale butter yellow, and light sand",
+    "forest and gold -- deep forest green, sage green, warm gold accent, cream, and soft moss",
+]
+
+# Structural risk, confirmed in testing: this layout pushes toward fewer,
+# heavier items rather than a long list shown lightly -- silently dropped
+# 6 of 10 items on a long-list topic with no indication anything was
+# omitted. Excluded from the pool specifically for topics in
+# TOPICS_WITH_LONG_LISTS (see build_image_prompt below); still available
+# for everything else.
+GRID_LAYOUT = "structured grid layout with clear rows and columns for icon-based information"
+
+IMAGE_LAYOUTS = [
+    "radial infographic layout with a central focal circle and surrounding information blocks",
+    GRID_LAYOUT,
+    "arched poster layout with stacked sections and soft geometric framing",
+    "organic landscape infographic layout with flowing bands, embedded icons, and one large focal area",
+]
+
+IMAGE_GRAPHIC_TREATMENTS = [
+    "clean flat icons with soft circular badges",
+    "thin line icons with editorial spacing and understated separators",
+    "layered geometric panels with subtle texture and depth",
+    "soft organic shape fields with icon callouts and minimal dividers",
 ]
 
 IMAGE_PROMPT_TEMPLATE = """Create one professional square social-media image for Trinity Tree Psychological Services, a clinical psychology practice in Glendale, Arizona.
@@ -194,36 +245,92 @@ Topic:
 Approved website information:
 {source_excerpt}
 
-Related social-media caption:
-{caption_excerpt}
+Related social-media captions (use these to inform which items to prioritize -- see CONTENT PRIORITY below):
+LinkedIn: {linkedin_caption_excerpt}
+Instagram: {instagram_caption_excerpt}
+Facebook: {facebook_caption_excerpt}
 
 Style: {style}
 Color palette: {color_palette}
+Layout direction: {layout}
+Graphic treatment: {graphic_treatment}
 
-Visual requirements:
-- Clean, warm, calm, modern, and trustworthy.
-- Suitable for a professional mental-health practice.
-- Include the text "Trinity Tree Psychological Services" visibly but subtly integrated into the design -- not as a large headline, not overlapping the main visual.
-- Use diverse, inclusive visual symbolism when people are relevant.
+CONTENT PRIORITY:
+- Focus on ONE primary idea from the topic.
+- Use the approved website information for factual grounding.
+- If the topic naturally involves a list of related items (services, conditions, contact details, hours), you may include the full accurate list -- but each item must be represented with minimal weight: a short icon and a brief single-line label, never a multi-line description, heading-plus-subheading pair, or explanatory sentence per item.
+- If the topic naturally involves a list of more than a few items, select approximately 6-7 for the image -- not the full list, but more than any single platform caption includes. Always include every item mentioned across the three captions above. Fill any remaining slots with other genuinely relevant items from the approved website information.
+- Do not invent, embellish, or elaborate on any single item beyond what's needed to name it clearly.
+- Prefer visual simplicity over completeness -- if a full list cannot be shown this lightly without crowding the canvas or losing legibility, select only the most relevant items instead.
+- Leave elaboration and explanation for the accompanying social-media caption; the image should name things, not explain them.
+- The image should be understandable within a few seconds of viewing.
+
+VISUAL DIRECTION:
+- Clean, warm, calm, modern, professional, and trustworthy.
+- Maintain an infographic-inspired or geometric aesthetic.
+- Use soft geometric elements such as rounded panels, arches, circles, curved lines, layered forms, simple iconography, and subtle dot patterns.
+- Keep generous negative space.
+- Avoid filling the entire canvas with information boxes or icons.
+- Do not create a directory, service catalog, menu, or comprehensive list of Trinity Tree services.
+- If icons are used, feature a moderate number rather than an overwhelming collection.
+- One strong focal element should be visually dominant.
+
+COLOR REQUIREMENTS:
+- Make the selected palette clearly visible and dominant throughout the design.
+- Favor warm cream and light neutral backgrounds.
+- Avoid blue-dominant designs, navy, cobalt, and cool corporate blues.
+- Avoid black-and-gold or luxury-brand styling.
+- Keep colors warm, natural, and approachable -- not muted, dusty, or desaturated.
+
+TEXT:
+- Keep text minimal.
+- Include "Trinity Tree Psychological Services" once as a small, understated brand signature.
+- If additional informational text is appropriate for the selected style, use only a very short headline or a few brief labels.
+- Do not reproduce long sentences or paragraphs from the website.
+- Avoid more than approximately 15 to 25 words of informational text, excluding the practice name.
+
+COMPOSITION:
+- Create a clearly distinct composition based on the selected layout direction.
+- Avoid repeatedly using a large centered panel surrounded by identical icon circles.
+- Do not reuse the same arrangement of circles, arches, plants, and information cards across every image.
+- Decorative botanical elements may be used sparingly but should not dominate every design.
+
+SAFETY AND ACCURACY:
 - Do not show identifiable real people.
-- Do not depict distress, medical emergencies, medications, restraints, diagnoses, or treatment outcomes.
-- Do not invent services or claims not supported by the supplied content.
-- Do not include any text other than the practice name above -- no additional slogans, phone numbers, URLs, hashtags, or invented quotes.
-- Do not include logos.
-- Avoid a generic therapy-room scene.
-- Use balanced composition with sufficient negative space.
+- Do not invent services, credentials, diagnoses, claims, or treatment outcomes.
+- Do not depict distress, medical emergencies, medications, or restraints.
+- Do not include logos, URLs, phone numbers, hashtags, or invented quotes.
+
+Overall goal:
+Create a polished social-media graphic that communicates one clear idea rather than trying to explain everything Trinity Tree offers.
 """
 
 
-def build_image_prompt(topic_key: str, topic_content: str, caption: str) -> str:
+def build_image_prompt(
+    topic_key: str,
+    topic_content: str,
+    linkedin_caption: str,
+    instagram_caption: str,
+    facebook_caption: str,
+) -> str:
     source_excerpt = " ".join(topic_content.split())[:3500]
-    caption_excerpt = " ".join(caption.split())[:1000]
+
+    available_layouts = IMAGE_LAYOUTS
+    if topic_key in TOPICS_WITH_LONG_LISTS:
+        available_layouts = [layout for layout in IMAGE_LAYOUTS if layout != GRID_LAYOUT]
+
+    chosen_layout = random.choice(available_layouts)
+
     return IMAGE_PROMPT_TEMPLATE.format(
         topic_key=topic_key,
         source_excerpt=source_excerpt,
-        caption_excerpt=caption_excerpt,
+        linkedin_caption_excerpt=" ".join(linkedin_caption.split()),
+        instagram_caption_excerpt=" ".join(instagram_caption.split()),
+        facebook_caption_excerpt=" ".join(facebook_caption.split()),
         style=random.choice(IMAGE_STYLES),
         color_palette=random.choice(IMAGE_COLOR_PALETTES),
+        layout=chosen_layout,
+        graphic_treatment=random.choice(IMAGE_GRAPHIC_TREATMENTS),
     ).strip()
 
 def format_caption(caption: str, hashtags: Sequence[str] | None = None) -> str:

@@ -93,7 +93,9 @@ def generate_image(state: PipelineState) -> dict:
     image_path = generate_post_image(
         topic_key=state["topic_key"],
         topic_content=state["topic_content"],
-        caption=draft.instagram.caption,
+        linkedin_caption=draft.linkedin.caption,
+        instagram_caption=draft.instagram.caption,
+        facebook_caption=draft.facebook.caption,
     )
     logger.info(f"image saved to: {image_path}")
     return {
