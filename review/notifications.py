@@ -705,6 +705,137 @@ Thread ID: {thread_id}
         thread_id,
     )
 
+# ---------------------------------------------------------------------------
+# Superseded review notification
+# ---------------------------------------------------------------------------
+
+
+def send_supersede_email(
+    thread_id: str,
+    topic_key: str,
+) -> None:
+    """
+    Notify reviewers that a pending review expired without a decision
+    and has been superseded by a fresh review.
+    """
+    recipients = get_review_recipients()
+
+    topic_display = _display_topic(
+        topic_key
+    )
+
+    subject = (
+        "[TT Social Review] "
+        f"Expired — {topic_display}"
+    )
+
+    # ------------------------------------------------------------------
+    # Plain-text fallback
+    # ------------------------------------------------------------------
+
+    text_body = f"""
+The Trinity Tree social media review has expired.
+
+Topic:
+{topic_display}
+
+This review passed its 48-hour review window without a decision.
+
+The expired review has been cleared, and a fresh post has already
+been generated for review in its place.
+
+No further action is required on this expired review.
+
+Thread ID: {thread_id}
+""".strip()
+
+    # ------------------------------------------------------------------
+    # HTML version
+    # ------------------------------------------------------------------
+
+    safe_topic = html.escape(
+        topic_display
+    )
+
+    safe_thread_id = html.escape(
+        thread_id
+    )
+
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <body
+        style="
+            font-family: Arial, Helvetica, sans-serif;
+            line-height: 1.6;
+            color: #222222;
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 24px;
+        "
+    >
+
+        <h2>
+            Social Review Expired
+        </h2>
+
+        <p>
+            <strong>Topic:</strong>
+            {safe_topic}
+        </p>
+
+        <p>
+            This review passed its
+            <strong>48-hour review window</strong>
+            without a decision.
+        </p>
+
+        <p>
+            The expired review has been cleared, and a fresh
+            post has already been generated for review in its
+            place.
+        </p>
+
+        <p>
+            <strong>
+                No further action is required on this expired review.
+            </strong>
+        </p>
+
+        <hr>
+
+        <p
+            style="
+                font-size: 12px;
+                color: #666666;
+            "
+        >
+            Review thread: {safe_thread_id}
+        </p>
+
+    </body>
+    </html>
+    """
+
+    logger.info(
+        "[review-notification] Preparing supersede "
+        "email thread_id=%s topic=%s",
+        thread_id,
+        topic_key,
+    )
+
+    send_email(
+        subject=subject,
+        text_body=text_body,
+        html_body=html_body,
+        recipients=recipients,
+    )
+
+    logger.info(
+        "[review-notification] Supersede email sent "
+        "thread_id=%s",
+        thread_id,
+    )
 
 # ---------------------------------------------------------------------------
 # Resolution notification

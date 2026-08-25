@@ -14,6 +14,7 @@ from google.cloud import firestore
 
 from pipeline.cadence import should_post_today
 from pipeline.logging_config import get_logger
+from review.notifications import send_supersede_email
 
 from dotenv import load_dotenv
 
@@ -84,9 +85,6 @@ def resolve_pending_review(thread_id: str, decision: str) -> dict | None:
     return _try_resolve(db.transaction())
 
 def check_and_resolve_stale_review() -> str:
-    """Checks for an existing pending review before a new run starts.
-    Returns 'skip' if one exists and is still within the expiry window,
-    'proceed' if none exists or a stale one was just superseded."""
     pending_docs = list(
         db.collection("pending_reviews").where("status", "==", "pending").stream()
     )
@@ -94,21 +92,29 @@ def check_and_resolve_stale_review() -> str:
     if not pending_docs:
         return "proceed"
 
-    doc = pending_docs[0]
-    record = doc.to_dict()
-    generated_at = record["generated_at"]
-    age = datetime.now(timezone.utc) - generated_at
+    now = datetime.now(timezone.utc)
+    any_still_valid = False
 
-    if age < timedelta(hours=REVIEW_EXPIRY_HOURS):
-        logger.info(f"pending review {doc.id} still within expiry window -- skipping this run")
-        return "skip"
+    for doc in pending_docs:
+        record = doc.to_dict()
+        age = now - record["generated_at"]
 
-    doc.reference.update({"status": "superseded"})
-    logger.info(f"pending review {doc.id} superseded after {age} -- proceeding with fresh generation")
+        if age < timedelta(hours=REVIEW_EXPIRY_HOURS):
+            any_still_valid = True
+            logger.info(f"pending review {doc.id} still within expiry window -- skipping this run")
+        else:
+            doc.reference.update({"status": "superseded"})
 
-    # TODO: notify both recipients that this was superseded, once
-    # review.notifications has a function for it -- send_resolution_email
-    # only supports approve/reject, not superseded.
-    logger.info(f"[STUB] would notify recipients that thread {doc.id} was superseded")
+            try:
+                send_supersede_email(
+                    thread_id=doc.id,
+                    topic_key=record["topic_key"],
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to send supersede email for thread %s",
+                    doc.id,
+                    exc_info=True,
+                )
 
-    return "proceed"
+    return "skip" if any_still_valid else "proceed"
