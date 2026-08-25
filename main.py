@@ -23,6 +23,7 @@ from langgraph.types import Command
 app = Flask(__name__)
 logger = get_logger(__name__)
 
+SERVICE_ROLE = os.getenv("SERVICE_ROLE", "private")
 
 @app.route("/", methods=["GET"])
 def health_check():
@@ -31,6 +32,9 @@ def health_check():
 
 @app.route("/run", methods=["POST"])
 def run_pipeline():
+    if SERVICE_ROLE != "private":
+        return jsonify({"status": "forbidden"}), 403
+
     if not acquire_run_lock():
         return jsonify({"status": "skipped", "reason": "another run is already in progress"}), 409
 
