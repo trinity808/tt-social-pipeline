@@ -15,7 +15,7 @@ from flask import Flask, jsonify, request
 from pipeline.graph import build_graph
 from pipeline.logging_config import get_logger
 from pipeline.run_lock import acquire_run_lock, release_run_lock
-from pipeline.review import resolve_pending_review
+from pipeline.review import resolve_pending_review, get_pending_review_status
 from review.notifications import send_resolution_email
 
 from langgraph.types import Command
@@ -23,6 +23,7 @@ from langgraph.types import Command
 app = Flask(__name__)
 logger = get_logger(__name__)
 
+SERVICE_ROLE = os.getenv("SERVICE_ROLE", "private")
 
 @app.route("/", methods=["GET"])
 def health_check():
@@ -31,6 +32,9 @@ def health_check():
 
 @app.route("/run", methods=["POST"])
 def run_pipeline():
+    if SERVICE_ROLE != "private":
+        return jsonify({"status": "forbidden"}), 403
+
     if not acquire_run_lock():
         return jsonify({"status": "skipped", "reason": "another run is already in progress"}), 409
 
@@ -66,9 +70,43 @@ def run_pipeline():
 
 
 @app.route("/review", methods=["GET"])
-def review_decision():
+def review_confirm_page():
     thread_id = request.args.get("thread_id")
     decision = request.args.get("decision")
+
+    if not thread_id or decision not in ("approved", "rejected"):
+        return "Invalid review link.", 400
+
+    record = get_pending_review_status(thread_id)
+
+    if record is None or record.get("status") != "pending":
+        return "<h2>This review link is invalid or has already been actioned.</h2>", 409
+
+    topic_display = record.get("topic_key", "").replace("_", " ").title()
+    decision_label = "Approve" if decision == "approved" else "Reject"
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: Arial, sans-serif; max-width: 500px; margin: 60px auto; text-align: center;">
+        <h2>Confirm your decision</h2>
+        <p>Topic: <strong>{topic_display}</strong></p>
+        <p>You are about to <strong>{decision_label}</strong> this post.</p>
+        <form method="POST" action="/review/confirm" onsubmit="document.getElementById('btn').disabled=true; document.getElementById('btn').innerText='Processing... this may take up to a minute';">
+            <input type="hidden" name="thread_id" value="{thread_id}">
+            <input type="hidden" name="decision" value="{decision}">
+            <button id="btn" type="submit" style="padding: 12px 24px; font-size: 16px;">
+                Confirm {decision_label}
+            </button>
+        </form>
+    </body>
+    </html>
+    """
+
+@app.route("/review/confirm", methods=["POST"])
+def review_confirm_action():
+    thread_id = request.form.get("thread_id")
+    decision = request.form.get("decision")
 
     if not thread_id or decision not in ("approved", "rejected"):
         return jsonify({"status": "invalid_request"}), 400
@@ -76,7 +114,7 @@ def review_decision():
     record = resolve_pending_review(thread_id, decision)
 
     if record is None:
-        logger.warning(f"review link for thread {thread_id} was invalid or already actioned")
+        logger.warning(f"review confirmation for thread {thread_id} was invalid or already actioned")
         return jsonify({"status": "already_actioned_or_invalid"}), 409
 
     logger.info(f"resuming thread {thread_id} with decision: {decision}")
@@ -99,12 +137,19 @@ def review_decision():
     except Exception as e:
         logger.warning(f"resolution email failed to send for thread {thread_id}: {e}")
 
-    return jsonify({
-        "status": "resolved",
-        "thread_id": thread_id,
-        "decision": decision,
-        "topic_key": result.get("topic_key"),
-    }), 200
+    topic_display = record.get("topic_key", "").replace("_", " ").title()
+    decision_label = "Approve" if decision == "approved" else "Reject"
+    
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: Arial, sans-serif; max-width: 500px; margin: 60px auto; text-align: center;">
+        <h2>Decision recorded</h2>
+        <p>Topic: <strong>{topic_display}</strong></p>
+        <p>Your decision to <strong>{decision_label}</strong> this post has been recorded.</p>
+    </body>
+    </html>
+    """
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
