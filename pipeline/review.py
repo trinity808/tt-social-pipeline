@@ -32,6 +32,17 @@ NUDGE_THRESHOLD_HOURS = 24
 PLATFORMS = ("linkedin", "facebook", "instagram")
 
 
+def get_pending_review_status(thread_id: str) -> dict | None:
+    """Read-only check -- never modifies anything. Used by the GET
+    confirmation page to validate a link before showing the confirm
+    button, without the read itself having any side effect."""
+    doc_ref = db.collection("pending_reviews").document(thread_id)
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
+        return None
+    return snapshot.to_dict()
+
+
 def create_pending_review(thread_id: str, topic_key: str, image_url: str, draft) -> dict:
     """Creates a new pending-review record, locking in each platform's
     cadence eligibility at the moment of generation -- not re-evaluated
