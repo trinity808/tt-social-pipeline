@@ -15,7 +15,7 @@ from flask import Flask, jsonify, request
 from pipeline.graph import build_graph
 from pipeline.logging_config import get_logger
 from pipeline.run_lock import acquire_run_lock, release_run_lock
-from pipeline.review import resolve_pending_review, get_pending_review_status
+from pipeline.review import resolve_pending_review, get_pending_review_status, check_and_resolve_stale_review
 from review.notifications import send_resolution_email
 
 from langgraph.types import Command
@@ -150,6 +150,23 @@ def review_confirm_action():
     </body>
     </html>
     """
+
+@app.route("/check-pending-reviews", methods=["POST"])
+def check_pending_reviews_endpoint():
+    if SERVICE_ROLE != "private":
+        return jsonify({"status": "forbidden"}), 403
+
+    try:
+        result = check_and_resolve_stale_review()
+    except Exception as e:
+        logger.exception(f"check_pending_reviews failed: {e}")
+        return jsonify({"status": "failed", "error": str(e)}), 500
+
+    if result == "proceed":
+        logger.info("nothing pending -- triggering fresh content generation")
+        return run_pipeline()
+
+    return jsonify({"status": "ok", "check_result": result}), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
