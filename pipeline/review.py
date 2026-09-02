@@ -104,12 +104,21 @@ def resolve_pending_review(thread_id: str, decision: str) -> dict | None:
 
 
 def check_and_resolve_stale_review() -> str:
+    """Returns:
+    - "skip": a still-valid pending review exists, do nothing.
+    - "refill": a pending review just expired/was superseded during this
+      check -- a replacement should be generated immediately.
+    - "idle": nothing was pending at all -- the normal state right after
+      a quick resolution. Should NOT trigger fresh generation on its own;
+      the next real draft is expected from the separate daily /run
+      schedule, not as a reaction to this check.
+    """
     pending_docs = list(
         db.collection("pending_reviews").where("status", "==", "pending").stream()
     )
 
     if not pending_docs:
-        return "proceed"
+        return "idle"
 
     now = datetime.now(timezone.utc)
     any_still_valid = False
@@ -165,4 +174,4 @@ def check_and_resolve_stale_review() -> str:
                     exc_info=True,
                 )
 
-    return "skip" if any_still_valid else "proceed"
+    return "skip" if any_still_valid else "refill"

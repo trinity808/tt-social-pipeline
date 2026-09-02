@@ -162,8 +162,8 @@ def check_pending_reviews_endpoint():
         logger.exception(f"check_pending_reviews failed: {e}")
         return jsonify({"status": "failed", "error": str(e)}), 500
 
-    if result == "proceed":
-        logger.info("nothing pending -- triggering fresh content generation")
+    if result == "refill":
+        logger.info("a pending review just expired -- triggering replacement content generation")
         return run_pipeline()
 
     return jsonify({"status": "ok", "check_result": result}), 200

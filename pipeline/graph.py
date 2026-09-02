@@ -269,7 +269,7 @@ def build_graph():
 
     graph.add_node("check_pending_review", check_pending_review)
     graph.set_entry_point("check_pending_review")
-    graph.add_conditional_edges("check_pending_review", route_after_pending_check, {"skip": END, "proceed": "load_topic"})
+    graph.add_conditional_edges("check_pending_review", route_after_pending_check, {"skip": END, "idle": "load_topic", "refill": "load_topic"})
     graph.add_edge("load_topic", "draft")
     graph.add_edge("draft", "critic")
     graph.add_conditional_edges("critic", route_after_critic, {"revise": "revise", "end": "generate_image"})
