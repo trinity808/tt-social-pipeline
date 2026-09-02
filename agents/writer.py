@@ -10,8 +10,13 @@ load_dotenv()
 
 openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
+WRITER_MODEL = os.getenv(
+    "WRITER_MODEL", 
+    "gpt-5.5",
+).strip()
 
-def draft_post(topic_content: str, model: str = "gpt-5.5") -> SocialPostDraft:
+
+def draft_post(topic_content: str, model: str = WRITER_MODEL) -> SocialPostDraft:
     prompt = build_prompt(topic_content)
     response = openai_client.chat.completions.create(
         model=model,
@@ -24,7 +29,7 @@ def revise_post(
     topic_content: str,
     previous_draft: SocialPostDraft,
     verdict: CriticVerdict,
-    model: str = "gpt-5.5",
+    model: str = WRITER_MODEL,
 ) -> SocialPostDraft:
     prompt = build_revision_prompt(topic_content, previous_draft, verdict)
     response = openai_client.chat.completions.create(
