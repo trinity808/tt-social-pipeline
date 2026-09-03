@@ -15,7 +15,13 @@ gemini_client = genai.Client(
 )
 
 
-def critique_draft(topic_content: str, draft: SocialPostDraft, model: str = "gemini-3.5-flash") -> CriticVerdict:
+CRITIC_MODEL = os.getenv(
+    "CRITIC_MODEL", 
+    "gemini-3.5-flash",
+).strip()
+
+
+def critique_draft(topic_content: str, draft: SocialPostDraft, model: str = CRITIC_MODEL) -> CriticVerdict:
     prompt = build_critic_prompt(topic_content, draft)
     response = gemini_client.models.generate_content(
         model=model,

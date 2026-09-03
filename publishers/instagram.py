@@ -20,9 +20,15 @@ from pipeline.prompts import format_caption
 from pipeline.secrets import _get_secret
 from pipeline.storage import upload_image_to_gcs
 
-GRAPH_API_VERSION = "v25.0"
+GRAPH_API_VERSION = os.getenv(
+    "META_GRAPH_VERSION",
+    "v25.0",
+).strip()
 
-INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "").strip()
+INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv(
+    "INSTAGRAM_BUSINESS_ACCOUNT_ID", 
+    "",
+).strip()
 
 logger = get_logger(__name__)
 
