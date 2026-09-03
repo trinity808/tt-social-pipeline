@@ -146,19 +146,12 @@ def route_after_critic(state: PipelineState) -> str:
 
 
 def send_for_review(state: PipelineState, config: RunnableConfig) -> dict:
-    """No interrupt() here -- this is a normal, fully-completed node once
-    it runs. It never re-executes on a later resume, unlike await_approval.
-
-    Uploads the image, creates the pending-review Firestore record, and
-    sends the real review-request email via review.notifications.
-    """
     thread_id = config["configurable"]["thread_id"]
     logger.info(f"sending draft for review (thread {thread_id})...")
 
     image_url = upload_image_to_gcs(state["image_path"])
-    pending_review = create_pending_review(thread_id, state["topic_key"], image_url)
-
     draft = state["draft"]
+    pending_review = create_pending_review(thread_id, state["topic_key"], image_url, draft)
 
     send_review_email(
         thread_id=thread_id,
@@ -276,7 +269,7 @@ def build_graph():
 
     graph.add_node("check_pending_review", check_pending_review)
     graph.set_entry_point("check_pending_review")
-    graph.add_conditional_edges("check_pending_review", route_after_pending_check, {"skip": END, "proceed": "load_topic"})
+    graph.add_conditional_edges("check_pending_review", route_after_pending_check, {"skip": END, "idle": "load_topic", "refill": "load_topic"})
     graph.add_edge("load_topic", "draft")
     graph.add_edge("draft", "critic")
     graph.add_conditional_edges("critic", route_after_critic, {"revise": "revise", "end": "generate_image"})
