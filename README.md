@@ -1,8 +1,169 @@
 # TT Social Pipeline
 
-Custom LangGraph-based pipeline for Trinity Tree's social media content drafting and publishing (LinkedIn, Instagram, Facebook), replacing the current n8n workflow.
+A LangGraph-based multi-agent pipeline that automates Trinity Tree Psychological Services' social media presence end to end, replacing an earlier no-code (n8n) workflow.
+
+Each day, the pipeline drafts a social media post grounded in the practice's actual website content, has it independently reviewed by a second AI model for factual accuracy before a human ever sees it, generates an accompanying image, and sends the whole package to a human reviewer for approval or rejection. Only after explicit human sign-off does anything actually publish — and even then, each platform (LinkedIn, Instagram, Facebook) only posts on its own configured cadence. Reviews that go unanswered are automatically nudged, and eventually superseded by a fresh draft, so nothing sits stale indefinitely and nothing publishes without a person deciding it should.
+
+## Prerequisites & local setup
+
+**System requirements:**
+- Python 3.11 or later
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (needed for the rebuild/redeploy cycle — see Operational reference)
+- [`gcloud` CLI](https://cloud.google.com/sdk/docs/install), authenticated to the `tt-social-pipeline` GCP project
+
+**1. Clone and set up a virtual environment:**
+```bash
+git clone https://github.com/trinity808/tt-social-pipeline.git
+cd tt-social-pipeline
+python -m venv venv
+source venv/Scripts/activate    # Windows Git Bash
+# or: source venv/bin/activate  # Mac/Linux
+pip install -r requirements.txt
+```
+
+**2. Copy `.env.example` to `.env` and fill in real values.** Most credentials come from one of these places:
+- GCP-related values (`GCP_PROJECT_ID`, etc.) — the GCP Console, project settings
+- LinkedIn values — the [LinkedIn Developer Portal](https://www.linkedin.com/developers/apps) (see LinkedIn token renewal section below for the full walkthrough)
+- Meta/Facebook/Instagram values — Meta Business Suite (see Meta token notes below)
+- Secrets that are *not* in `.env` at all (API keys stored in Secret Manager, like `openai-api-key` and `review-gmail-app-password`) are fetched at runtime automatically — no local copy needed as long as you're authenticated (next step)
+
+**3. Authenticate for local GCP access:**
+```bash
+gcloud auth application-default login
+```
+This lets local code (Firestore, Secret Manager, Vertex AI, Cloud Storage clients) authenticate the same way it does when deployed, without needing a downloaded service-account key file. Confirm the following APIs are enabled on the project: Firestore, Secret Manager, Vertex AI, Cloud Storage, Cloud Run, Cloud Scheduler.
+
+**4. Confirm the setup works with a single, low-stakes local run:**
+```bash
+python -m pipeline.graph
+```
+This runs the full pipeline once — real draft, real critic review, real image generation — and pauses at the human review step, printing a thread ID. It costs a small amount in API usage but makes zero external posts and sends zero real emails unless the notification system is also fully configured. If this completes without error and pauses correctly, your local setup is working.
+
+**Everything past this point — deployment, credential rotation, the rebuild/redeploy cycle — is covered in the Operational reference section below, not here.**
 
 **Status:** In development. n8n remains the live fallback until this is proven end-to-end.
+
+## Project structure
+
+```
+tt-social-pipeline/
+├── .env.example
+├── Dockerfile
+├── README.md
+├── requirements.txt
+├── main.py                          # Cloud Run entrypoint (Flask): /run, /review, /review/confirm, /check-pending-reviews
+├── agents/
+│   ├── critic.py                    # Gemini-based factual review of each draft
+│   ├── image_generator.py           # Generates and saves the accompanying post image
+│   └── writer.py                    # GPT-based drafting and revision
+├── content/
+│   └── site_content.json            # Scraped source content per topic, used for grounding
+├── pipeline/
+│   ├── cadence.py                   # Per-platform posting-day rules
+│   ├── graph.py                     # LangGraph node definitions and graph assembly
+│   ├── logging_config.py            # Structured JSON logging setup
+│   ├── meta_errors.py               # Shared Facebook/Instagram error classification
+│   ├── prompts.py                   # All writer/critic/image prompt templates
+│   ├── review.py                    # Pending-review Firestore lifecycle (create/resolve/expire/nudge)
+│   ├── rotation.py                  # Topic selection and recency tracking
+│   ├── run_lock.py                  # Prevents overlapping pipeline runs
+│   ├── secrets.py                   # Secret Manager access helpers
+│   ├── state.py                     # Shared LangGraph state schema
+│   └── storage.py                   # GCS upload/download for generated images
+├── publishers/
+│   ├── facebook.py
+│   ├── instagram.py
+│   └── linkedin.py                  # Includes token refresh handling
+├── review/
+│   ├── emailer.py                   # SMTP sending, recipient configuration
+│   └── notifications.py             # All four notification email templates
+└── scripts/                         # Manual/one-off tools -- see below, not run automatically
+    ├── classify_topic_list_length.py
+    ├── fetch_site_content.py
+    ├── run_bakeoff.py
+    ├── test_cadence.py              # Genuine automated pytest suite
+    ├── test_checkpointer.py
+    ├── test_resume_review.py
+    ├── test_review_gate.py
+    └── ...                          # (see full listing/annotations below)
+```
+
+### `scripts/` reference
+
+Manual, one-off tools -- not run automatically, not a pytest suite (aside from `test_cadence.py`). Several make real, live calls to external services; those are flagged below.
+
+| File | What it does |
+|---|---|
+| `classify_topic_list_length.py` | One-time LLM classification tool that generated `TOPICS_WITH_LONG_LISTS` |
+| `fetch_site_content.py` | Scrapes `site_content.json` from the live site; has a documented gotcha re: `/contact`'s dynamic "today's hours" widget freezing incorrectly |
+| `run_bakeoff.py` | Phase 1 model bake-off script — the comparison that led to dropping Groq |
+| `bakeoff_results.json` | Output data from the above |
+| `gcs_lifecycle.json` | GCS bucket 60-day auto-delete policy config |
+| `post_facebook_test.py` | ⚠️ Posts to the real Facebook page — hardcoded, confirmation-gated, not automated |
+| `post_linkedin_test.py` | ⚠️ Posts to the real LinkedIn page, graph-based with image — hardcoded, confirmation-gated |
+| `test_linkedin_publisher.py` | ⚠️ Posts to the real LinkedIn page via `publishers.linkedin` directly — hardcoded, confirmation-gated |
+| `test_instagram_publisher.py` | ⚠️ Posts to the real Instagram account — hardcoded, confirmation-gated |
+| `test_cadence.py` | Genuine automated `pytest` suite — safe to run freely, no live calls |
+| `test_checkpointer.py` | Standalone LangGraph checkpointer pause/resume proof-of-concept, run as two separate manual invocations |
+| `test_resume_review.py` | Manual harness for resuming a real paused review thread via `Command(resume=...)` against the actual graph |
+| `test_review_gate.py` | Zero-cost hardcoded test of the full review-gate flow, reusing an existing local image to avoid generation cost |
+| `test_followup_5min.py` | Manual nudge-timing test using a shortened 5-minute delay instead of the real 24 hours, with a file-touch trick to simulate an approval interrupting the wait |
+| `test_resolution_email.py` | ⚠️ Sends a real resolution email — manual CLI test of `send_resolution_email()`, accepts approve/reject and an optional resolver-email argument |
+| `test_smtp_connection.py` | Standalone SMTP credential check — prompts for a Gmail address and App Password directly, isolates auth issues from the rest of the notification system (likely built during the credential-typo debugging) |
+
+## Operational reference: config, secrets, and deployment
+
+**Where configuration actually lives, and the one rule that matters most.** Real secrets (API keys, tokens, the Gmail App Password) live in GCP Secret Manager, referenced at deploy time via `--set-secrets`. Everything else — project ID, model names, cadence settings, `SERVICE_ROLE`, recipient addresses — is a plain environment variable set directly on each Cloud Run service.
+
+**Local `.env` and what's actually deployed are two completely separate things — never assume one reflects the other.** Nearly every real deployment issue hit in this project traced back to exactly this gap: a value correct locally but never actually pushed to one or both Cloud Run services (a missing `SERVICE_ROLE`, three different spellings of the same sender email across three different places, missing recipient variables entirely). Always verify directly against what's deployed (see point 4) rather than trusting local `.env` as a stand-in for it.
+
+**Rebuild and redeploy cycle:**
+```bash
+docker build -t tt-social-pipeline .
+docker tag tt-social-pipeline us-central1-docker.pkg.dev/tt-social-pipeline/tt-social-pipeline/tt-social-pipeline:latest
+docker push us-central1-docker.pkg.dev/tt-social-pipeline/tt-social-pipeline/tt-social-pipeline:latest
+```
+Both `tt-social-pipeline` (private) and `tt-social-pipeline-review` (public) run the identical image — **both need redeploying**, not just one, since they're built from the same Dockerfile and share the same codebase.
+
+**Critical: a bare `--image` redeploy can silently do nothing at all.** Cloud Run appears to compare the image *reference string*, not its actual content — redeploying with an unchanged `:latest` tag has, in practice, sometimes produced a successful-looking "Done" message while leaving the *previous* revision's code still running underneath. **Always redeploy using a full `--set-env-vars` restatement of every variable**, not a bare `--image`-only update — a complete environment replacement reliably forces Cloud Run to create a genuinely new revision:
+```bash
+gcloud run deploy tt-social-pipeline \
+  --image=us-central1-docker.pkg.dev/tt-social-pipeline/tt-social-pipeline/tt-social-pipeline:latest \
+  --region=us-central1 \
+  --set-env-vars="<full list, see table below>" \
+  --set-secrets="OPENAI_API_KEY=openai-api-key:latest"
+```
+Repeat for `tt-social-pipeline-review`, adding `--allow-unauthenticated` and setting `SERVICE_ROLE=public` instead of `private` in its env vars.
+
+**Verifying a deploy actually worked — don't trust a successful CLI message alone.**
+```bash
+gcloud run services describe tt-social-pipeline --region=us-central1 --format="export"
+gcloud run services describe tt-social-pipeline-review --region=us-central1 --format="export"
+```
+Check two things in the output: the `client.knative.dev/nonce` value has changed from before this deploy (proof a genuinely new revision was created, not a silent no-op per the warning above), and every expected environment variable is present with the correct value — not just "present," since a typo in a value is just as real a failure as a missing one.
+
+**Sync with `main` before rebuilding from any branch — a stale branch will be faithfully rebuilt, missing anything, is missing.** A branch that hasn't pulled recent changes will deploy exactly what it has, silently omitting anything merged into `main` since it was last synced — this is exactly how a real security fix was once briefly absent from a live deployment, despite already being merged and available. Always run `git pull origin main` and merge it into your working branch before rebuilding, regardless of how recently that branch was last touched.
+
+**Full current environment variable reference**, across both services (`P` = private service `tt-social-pipeline`, `R` = public/review service `tt-social-pipeline-review`):
+
+| Variable | Private | Public | Notes |
+|---|---|---|---|
+| `GCP_PROJECT_ID` | ✅ | ✅ | |
+| `VERTEX_AI_LOCATION` | ✅ | ✅ | |
+| `LINKEDIN_VERSION` | ✅ | ✅ | See LinkedIn token renewal section for the version-rotation gotcha |
+| `META_GRAPH_VERSION` | ✅ | ✅ | Now read consistently by both Facebook and Instagram publishers |
+| `INSTAGRAM_BUSINESS_ACCOUNT_ID` | ✅ | ✅ | |
+| `LINKEDIN_ORG_URN` | ✅ | ✅ | |
+| `LINKEDIN_CLIENT_ID` | ✅ | ✅ | |
+| `FACEBOOK_PAGE_ID` | ✅ | ✅ | |
+| `REVIEW_PUBLIC_BASE_URL` | ✅ | ✅ | Must point at the *public* service's URL on both |
+| `SERVICE_ROLE` | `private` | `public` | Defense-in-depth guard on `/run` and `/check-pending-reviews` |
+| `ENVIRONMENT` | ✅ | ✅ | Currently `development` on both — production recipient swap not yet done |
+| `REVIEW_DEV_TO` / `REVIEW_DEV_CC` | ✅ | ✅ | |
+| `REVIEW_PROD_TO` / `REVIEW_PROD_CC` | not yet set | not yet set | Needed before real production launch |
+| `REVIEW_EMAIL_FROM` | ✅ | ✅ | Verify exact spelling — a mismatch here caused a real, confusing SMTP auth failure |
+| `OPENAI_API_KEY` | via Secret Manager | via Secret Manager | |
+| `WRITER_MODEL` / `CRITIC_MODEL` | not set (uses fallback) | not set (uses fallback) | Emergency escape hatch only — see model version dependencies section |
 
 ## LinkedIn token renewal (annual)
 
@@ -36,6 +197,12 @@ https://graph.facebook.com/v25.0/{FACEBOOK_PAGE_ID}?fields=access_token&access_t
 
    The `access_token` field in that response is the real, `"type": "PAGE"` token — that's what goes into Secret Manager (`meta-access-token`), not the System User token itself.
 3. Confirm with `debug_token` again before trusting it — should show `"type": "PAGE"` and both expiry fields still at `0`.
+
+## Graph orchestration & checkpointer
+
+✅ **Content already written and solid — no rewrite needed.** Just:
+- Rename this heading to match: "Graph orchestration & checkpointer" (currently titled "Graph Orchestration")
+- The Phase 5 cross-reference is still correct in substance, but Phase 5 has been substantially rewritten since this was written (both false-claim corrections and the full IAM/security section were added) — worth a quick reread of the current version to confirm nothing here needs adjusting to match it
 
 ## Image generation
 
@@ -74,6 +241,46 @@ A version bump is a protocol-compatibility change, nothing more — same model, 
 
 Swapping `WRITER_MODEL` or `CRITIC_MODEL` is a materially different kind of decision. Model choice directly affects output quality, tone, JSON-parsing reliability, and factual grounding — the exact reason the original model bake-off (Phase 1) existed in the first place, and why Groq was dropped from consideration entirely after it repeatedly fabricated an unsupported "board-certified" credential. **Treat these two env vars as an emergency escape hatch for a hard model deprecation, not a routine setting to casually tweak.** Changing either means re-verifying grounding behavior and JSON reliability before trusting it in production — effectively repeating the spirit of the original bake-off at a smaller scale, not just redeploying and moving on.
 
+## Publish nodes
+
+⚠️ **Mostly solid, two things worth addressing, not a full rewrite:**
+- Rename heading to "Publish nodes" (currently "Publishing")
+- Consider collapsing the four `###` subsections (LinkedIn/Facebook/Instagram/Independent platform publishing) into continuous prose with bold lead-ins, matching the style used in the Image Generation and Email/notification sections — your call whether the subheadings genuinely add value here or just add nesting
+- The independent-publishing explanation is good, but doesn't yet mention *that* cadence eligibility is locked in at draft time rather than re-checked at approval time, or point to where that happens (Phase 5's `create_pending_review`/`publish_post`). Worth a sentence added here, even briefly, since a reader currently learns cadence gating exists without learning why it works the way it does
+
+## Posting cadence
+
+✅ **Content already written and solid — no rewrite needed.** Just rename this heading to "Posting cadence" (currently titled "Posting Cadence") for consistency with the rest of the file's heading style. Correctly cross-references cadence-locking without duplicating it — nothing else to change.
+
+## Storage & run-safety
+
+✅ **Content already written and solid — no rewrite needed.** Just rename this heading to "Storage & run-safety" (currently titled "Storage and Run Safety") for consistency with the rest of the file.
+
+## Email/notification system
+
+**Recipient configuration switches on `ENVIRONMENT`, but only the development path is currently active.** `get_review_recipients()` reads `REVIEW_DEV_TO`/`REVIEW_DEV_CC` when `ENVIRONMENT` is set to development, or `REVIEW_PROD_TO`/`REVIEW_PROD_CC` in production. **Right now, only the dev configuration is live** — real notifications currently go to a development inbox, not to the actual clinical reviewers. Swapping to production recipients (Dr. Nguyen as primary, Dr. Shelton CC'd, per his own instruction in a team meeting) is a required step before this goes live for real, not something already done.
+
+**SMTP authentication uses a Gmail App Password pulled from Secret Manager (`review-gmail-app-password`), with `REVIEW_EMAIL_FROM` as the sending identity — worth knowing the exact failure mode if this ever breaks again.** During deployment testing, three different spellings of the same practice email address (`trinitytreepysch@gmail.com`, `trinitytreepsych@gmail.com`, `trinitytreepysych@gmail.com`) ended up set independently across local `.env` and two separate deployed services. The result was a genuine `535 Bad Credentials` SMTP rejection — which reads exactly like a wrong or expired App Password, but was actually just a typo in the sending address. If this error ever recurs, check `REVIEW_EMAIL_FROM`'s exact spelling everywhere it's set before assuming the credential itself is bad.
+
+**Four distinct email functions exist, each tied to a specific point in the review lifecycle — not one generic "send an email" function:**
+
+| Function | Fires when | Called from |
+|---|---|---|
+| `send_review_email()` | A new draft is ready for review | `send_for_review` (`pipeline/graph.py`) |
+| `send_review_followup_email()` | A review has been pending 24+ hours | `check_and_resolve_stale_review()` (`pipeline/review.py`) |
+| `send_supersede_email()` | A review expired at 48 hours, unresolved | `check_and_resolve_stale_review()` (`pipeline/review.py`) |
+| `send_resolution_email()` | A decision (approve/reject) was just resolved | `/review/confirm` (`main.py`) |
+
+All four live in `review/notifications.py` and share the same underlying `send_email()` (`review/emailer.py`), plain-text-plus-HTML pattern.
+
+**Approval links are shared, not personalized — deliberate, since only the outcome matters, not who specifically acted.** `build_review_links()` generates one Approve/Reject URL pair per review, sent identically to every recipient rather than a distinct link per person. Any recipient clicking either link resolves the review for everyone.
+
+**`send_resolution_email()`'s `resolved_by_email` parameter is built for a future feature, currently unreachable in practice — worth understanding as forward-looking, not dead code.** If a resolver's identity were known, this parameter would exclude that person from the resolution notification, so only the non-clicking reviewer gets notified. Since links are currently shared and carry no identity information, there's genuinely no way to know who clicked — this parameter is always effectively `None` in real use today, and the function correctly falls back to notifying both recipients every time. This would only become active if a future personalized-link feature is built.
+
+**The GET-request vulnerability that led to the current confirmation-page design is documented in full under Phase 5 / IAM & security below — this section only covers link generation, not the fix itself.**
+
+**Two files that no longer exist are worth a brief historical note, so their absence in git history doesn't read as confusing.** `review/links.py` was early scaffolding for link generation, later found to duplicate logic already built into `notifications.py`'s own `build_review_links()` — removed once that duplication was caught. `review/gate.py` was an early placeholder from initial project planning that was never filled in; the review-gate logic it was meant to hold ended up living directly in `pipeline/graph.py`'s nodes instead. Both were confirmed unused (no imports anywhere in the codebase) before deletion.
+
 ## Phase 5: human review gate
 
 Full design (recipient model, approval mechanics, cadence-lock rule) lives in `phase5-review-gate-design.md`. This section covers operational knowledge for whoever maintains this later.
@@ -98,6 +305,28 @@ Calling `.__enter__()` manually (rather than a `with` block) keeps the checkpoin
 
 **24-hour nudge and superseded-thread notifications are both fully built and confirmed working**. `send_review_followup_email()` and `send_supersede_email()` (both in `review/notifications.py`) are called from `check_and_resolve_stale_review()`. Verified live, end-to-end, unattended: a real pending thread correctly received a 24-hour nudge, correctly expired and superseded at 48 hours, and correctly triggered fresh content generation immediately afterward -- which then received its own nudge on schedule, confirming the cycle holds across repeated generations, not just once.
 
-**`/review` and `/run` now run as two separate Cloud Run services**, since Cloud Run's IAM check applies at the whole-service level with no native per-route control. `tt-social-pipeline` (private, `--no-allow-unauthenticated`) handles `/run` and `/check-pending-reviews`; `tt-social-pipeline-review` (public, `--allow-unauthenticated`) handles reviewer-facing traffic. Both run the identical image -- a `SERVICE_ROLE` env var (`private`/`public`) is checked inside `/run` and `/check-pending-reviews` as defense-in-depth, in case the IAM split is ever misconfigured.
+**Cloud Run's access control applies at the whole-service level, with no native way to make one route public while keeping others private.** This was confirmed directly against Google's own documentation before any architecture decision was made, rather than assumed: there is no per-route IAM mechanism in Cloud Run. Given `/review` needs to be reachable by a reviewer clicking a link from any device, while `/run` must never be triggered by anyone but Cloud Scheduler, a single service could not satisfy both requirements at once.
+
+**The fix is running two separate Cloud Run services from the identical container image, not two different codebases.** `tt-social-pipeline` is the private service (`--no-allow-unauthenticated`) and handles `/run` and `/check-pending-reviews` — both meant to be triggered only by Cloud Scheduler's own service-account identity. `tt-social-pipeline-review` is the public service (`--allow-unauthenticated`) and handles all reviewer-facing traffic (`/review`, `/review/confirm`). Both are deployed from the exact same image; only their Cloud Run IAM setting differs.
+
+**A `SERVICE_ROLE` environment variable (`private`/`public`) provides a second, application-level safeguard on top of the platform-level split.** Because both services share one image, `/run` and `/check-pending-reviews` technically still exist as real routes on the public service too — nothing at the code level prevents someone from hitting them there directly. Both routes check `SERVICE_ROLE` and return a clean `403` if it isn't `"private"`, regardless of what a request's URL happens to be. This is deliberately redundant with the IAM split: if the platform-level configuration is ever accidentally changed, this check still holds.
 
 **A real vulnerability was found and fixed via live testing, not caught in review -- worth documenting in full detail elsewhere, summarized here.** The original `/review` design resolved a decision directly on a `GET` request. An institutional email security scanner pre-fetching links to check for malware silently triggered a real reject decision before a human ever opened the email -- confirmed twice, from actual production logs (a `HEAD`/`GET` request with a non-human user agent, arriving seconds after the email sent). Fixed by splitting into a read-only `GET /review` confirmation page and a `POST /review/confirm` action route, the latter only reachable via a genuine form submission.
+
+**The vulnerability, in full detail: automated email link-scanning silently executed real review decisions before a human ever saw them.** The original `/review` route resolved a decision directly on a plain `GET` request — a URL that only needed to be *visited*, not deliberately submitted, to take effect. Many institutional email security systems automatically pre-fetch every link in an incoming message to check it for malware before the recipient ever opens it, treating that fetch as a routine safety check with no expectation that visiting a link could itself change anything. This is exactly what happened here: production logs showed a `HEAD`/`GET` request carrying a clearly non-human user agent, arriving mere seconds after a review email was sent — well before either intended recipient had opened it. That automated fetch silently executed a real reject decision. This wasn't caught in code review or local testing; it only surfaced because a live production email happened to be scanned this way, and the resulting Firestore record and Cloud Logging entries were traced back to confirm exactly what occurred. It was confirmed a second time on a separate occasion, with an identical signature, ruling out a one-off fluke.
+
+**The fix separates a safe, read-only confirmation step from the actual decision-executing action.** `GET /review` now only renders a confirmation page — showing the topic and the pending decision, with a genuine "Confirm" button — and has no side effects at all, no matter how many times or how automatically it's requested. Only submitting that form issues a `POST /review/confirm`, which is where `resolve_pending_review()` and the actual graph resume now live. Automated scanners routinely fetch links but essentially never submit forms, which is precisely why this split closes the gap. A smaller usability fix rode along with this change: a real, non-scanner approval was found to take roughly 30 seconds end to end (publishing sequentially to three platforms), and a fully blank screen during that wait had led to a genuine accidental double-submission during testing. The confirmation page now shows immediate "Processing..." feedback the instant the button is pressed, and `/review/confirm` returns a proper human-readable success page instead of raw JSON.
+
+**The vulnerability, in full detail: automated email link-scanning silently executed real review decisions before a human ever saw them.** The original `/review` route resolved a decision directly on a plain `GET` request — a URL that only needed to be *visited*, not deliberately submitted, to take effect. Many institutional email security systems automatically pre-fetch every link in an incoming message to check it for malware before the recipient ever opens it, treating that fetch as a routine safety check with no expectation that visiting a link could itself change anything. This is exactly what happened here: production logs showed a `HEAD`/`GET` request carrying a clearly non-human user agent, arriving mere seconds after a review email was sent — well before either intended recipient had opened it. That automated fetch silently executed a real reject decision. This wasn't caught in code review or local testing; it only surfaced because a live production email happened to be scanned this way, and the resulting Firestore record and Cloud Logging entries were traced back to confirm exactly what occurred. It was confirmed a second time on a separate occasion, with an identical signature, ruling out a one-off fluke.
+
+**The fix separates a safe, read-only confirmation step from the actual decision-executing action.** `GET /review` now only renders a confirmation page — showing the topic and the pending decision, with a genuine "Confirm" button — and has no side effects at all, no matter how many times or how automatically it's requested. Only submitting that form issues a `POST /review/confirm`, which is where `resolve_pending_review()` and the actual graph resume now live. Automated scanners routinely fetch links but essentially never submit forms, which is precisely why this split closes the gap. A smaller usability fix rode along with this change: a real, non-scanner approval was found to take roughly 30 seconds end to end (publishing sequentially to three platforms), and a fully blank screen during that wait had led to a genuine accidental double-submission during testing. The confirmation page now shows immediate "Processing..." feedback the instant the button is pressed, and `/review/confirm` returns a proper human-readable success page instead of raw JSON.
+
+**The vulnerability, in full detail: automated email link-scanning silently executed real review decisions before a human ever saw them.** The original `/review` route resolved a decision directly on a plain `GET` request — a URL that only needed to be *visited*, not deliberately submitted, to take effect. Many institutional email security systems automatically pre-fetch every link in an incoming message to check it for malware before the recipient ever opens it, treating that fetch as a routine safety check with no expectation that visiting a link could itself change anything. This is exactly what happened here: production logs showed a `HEAD`/`GET` request carrying a clearly non-human user agent, arriving mere seconds after a review email was sent — well before either intended recipient had opened it. That automated fetch silently executed a real reject decision. This wasn't caught in code review or local testing; it only surfaced because a live production email happened to be scanned this way, and the resulting Firestore record and Cloud Logging entries were traced back to confirm exactly what occurred. It was confirmed a second time on a separate occasion, with an identical signature, ruling out a one-off fluke.
+
+**The fix separates a safe, read-only confirmation step from the actual decision-executing action.** `GET /review` now only renders a confirmation page — showing the topic and the pending decision, with a genuine "Confirm" button — and has no side effects at all, no matter how many times or how automatically it's requested. Only submitting that form issues a `POST /review/confirm`, which is where `resolve_pending_review()` and the actual graph resume now live. Automated scanners routinely fetch links but essentially never submit forms, which is precisely why this split closes the gap. A smaller usability fix rode along with this change: a real, non-scanner approval was found to take roughly 30 seconds end to end (publishing sequentially to three platforms), and a fully blank screen during that wait had led to a genuine accidental double-submission during testing. The confirmation page now shows immediate "Processing..." feedback the instant the button is pressed, and `/review/confirm` returns a proper human-readable success page instead of raw JSON.
+
+**The vulnerability, in full detail: automated email link-scanning silently executed real review decisions before a human ever saw them.** The original `/review` route resolved a decision directly on a plain `GET` request — a URL that only needed to be *visited*, not deliberately submitted, to take effect. Many institutional email security systems automatically pre-fetch every link in an incoming message to check it for malware before the recipient ever opens it, treating that fetch as a routine safety check with no expectation that visiting a link could itself change anything. This is exactly what happened here: production logs showed a `HEAD`/`GET` request carrying a clearly non-human user agent, arriving mere seconds after a review email was sent — well before either intended recipient had opened it. That automated fetch silently executed a real reject decision. This wasn't caught in code review or local testing; it only surfaced because a live production email happened to be scanned this way, and the resulting Firestore record and Cloud Logging entries were traced back to confirm exactly what occurred. It was confirmed a second time on a separate occasion, with an identical signature, ruling out a one-off fluke.
+
+**The fix separates a safe, read-only confirmation step from the actual decision-executing action.** `GET /review` now only renders a confirmation page — showing the topic and the pending decision, with a genuine "Confirm" button — and has no side effects at all, no matter how many times or how automatically it's requested. Only submitting that form issues a `POST /review/confirm`, which is where `resolve_pending_review()` and the actual graph resume now live. Automated scanners routinely fetch links but essentially never submit forms, which is precisely why this split closes the gap. A smaller usability fix rode along with this change: a real, non-scanner approval was found to take roughly 30 seconds end to end (publishing sequentially to three platforms), and a fully blank screen during that wait had led to a genuine accidental double-submission during testing. The confirmation page now shows immediate "Processing..." feedback the instant the button is pressed, and `/review/confirm` returns a proper human-readable success page instead of raw JSON.
+
+**A separate, lightweight `/check-pending-reviews` endpoint exists specifically to decouple review-staleness checking from costly content generation — and its own design had a real bug, found and fixed through live testing.** Originally, only `/run` ever checked for stale or nudge-eligible reviews, meaning that check only ran once a day on a fixed schedule. Because real draft/critic/image-generation processing takes a consistent 1-2 minutes, a review's exact age at each daily check could land just barely on the wrong side of the 24- or 48-hour threshold — delaying a nudge or an expiry-triggered redraft by up to a full extra day. `/check-pending-reviews`, triggered hourly by its own Cloud Scheduler job, shrinks that worst-case gap from a day to under an hour, without incurring any generation cost on the (common) hourly ticks where nothing needs to happen. Building this endpoint initially introduced its own bug, though: the underlying check only ever returned a single signal (`"proceed"`) for both "nothing is currently pending" and "something just expired and needs replacing" — meaning *any* quick approve or reject, followed by the very next hourly check finding nothing pending, would also trigger an unwanted fresh draft. This was caught live in production (a new post appearing an hour after a fast rejection) and fixed by splitting the check's result into three distinct states — `skip`, `refill`, and `idle` — so fresh generation is only ever triggered by a genuine expiry, never by the routine, healthy state of "nothing to review right now." A separate, standalone daily Cloud Scheduler job for `/run` was added alongside this fix, since the system had never actually had one — it had been relying entirely on the (buggy) hourly check as its only source of new content.
