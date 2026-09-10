@@ -1,6 +1,7 @@
 import os
 
 from dotenv import load_dotenv
+from langsmith.wrappers import wrap_openai
 from openai import OpenAI
 
 from pipeline.prompts import build_prompt, build_revision_prompt
@@ -8,7 +9,7 @@ from pipeline.state import CriticVerdict, parse_model, SocialPostDraft
 
 load_dotenv()
 
-openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+openai_client = wrap_openai(OpenAI(api_key=os.environ["OPENAI_API_KEY"]))
 
 WRITER_MODEL = os.getenv(
     "WRITER_MODEL", 
