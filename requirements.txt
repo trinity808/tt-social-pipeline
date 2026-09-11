@@ -32,5 +32,5 @@ gunicorn
 # --- Testing (Phase 6) ---
 pytest
 
-# --- Optional: agent tracing, uncomment if you set up LangSmith ---
-# langsmith
+# --- Agent tracing using LangSmith ---
+langsmith

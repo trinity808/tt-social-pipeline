@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
+from langsmith.wrappers import wrap_openai
 from openai import OpenAI
 
 from pipeline.prompts import build_image_prompt
@@ -31,7 +32,7 @@ def generate_post_image(
         raise RuntimeError("OPENAI_API_KEY is missing from the environment.")
 
     model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
-    client = OpenAI(api_key=api_key)
+    client = wrap_openai(OpenAI(api_key=api_key))
 
     prompt = build_image_prompt(
         topic_key=topic_key,
