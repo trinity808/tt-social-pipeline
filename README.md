@@ -301,10 +301,12 @@ Posting schedules are defined in pipeline/cadence.py.
 
 The current POSTING_DAYS configuration is:
 
-Platform  Posting schedule
-LinkedIn  Monday, Wednesday, Friday
-Facebook  Daily
-Instagram Daily
+| Platform  | Posting schedule          |
+| --------- | ------------------------- |
+| LinkedIn  | Monday, Wednesday, Friday |
+| Facebook  | Daily                     |
+| Instagram | Daily                     |
+
 should_post_today() checks whether a platform is eligible to post on a given day.
 
 If no date is provided, the function uses the current business date in:
@@ -316,7 +318,7 @@ The decision about when cadence eligibility becomes locked into a review is hand
 
 ## Storage & run-safety
 
-GCS image storage
+**GCS image storage.**
 
 pipeline/storage.py supports both uploading and downloading generated images.
 
@@ -330,7 +332,7 @@ GCS therefore provides durable image storage between generation, approval, and p
 
 It also provides the hosted image URL required by Instagram's publishing flow.
 
-Run lock
+**Run lock.**
 
 pipeline/run_lock.py uses Firestore transactions to prevent multiple scheduled pipeline runs from starting at the same time.
 
