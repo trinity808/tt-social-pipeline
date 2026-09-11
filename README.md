@@ -200,9 +200,25 @@ https://graph.facebook.com/v25.0/{FACEBOOK_PAGE_ID}?fields=access_token&access_t
 
 ## Graph orchestration & checkpointer
 
-✅ **Content already written and solid — no rewrite needed.** Just:
-- Rename this heading to match: "Graph orchestration & checkpointer" (currently titled "Graph Orchestration")
-- The Phase 5 cross-reference is still correct in substance, but Phase 5 has been substantially rewritten since this was written (both false-claim corrections and the full IAM/security section were added) — worth a quick reread of the current version to confirm nothing here needs adjusting to match it
+The main workflow is defined in pipeline/graph.py.
+check_pending_review
+→ load_topic
+→ draft
+→ critic
+→ revise (if needed)
+→ generate_image
+→ send_for_review
+→ await_approval
+→ publish_post / handle_rejection
+Critic retry loop
+The critic reviews the LinkedIn, Facebook, and Instagram drafts before the workflow continues.
+If any draft is rejected, the graph routes to revise, where the writer receives the critic feedback and generates an updated version. The revised draft is then evaluated again.
+The retry loop is intentionally limited:
+MAX_RETRIES = 1
+This prevents the graph from repeatedly regenerating content indefinitely. After the allowed revision attempt, the workflow continues to image generation and human review.
+Review checkpointing
+The workflow uses a Firestore-backed LangGraph checkpointer so the graph can pause during human review and resume later.
+The detailed FirestoreSaver.from_conn_info(...).__enter__() setup, checkpointer lifecycle, interrupt/resume behavior, IAM and security considerations, and the reason send_for_review and await_approval are separate nodes are documented in the Phase 5 section of this README.
 
 ## Image generation
 
@@ -243,18 +259,86 @@ Swapping `WRITER_MODEL` or `CRITIC_MODEL` is a materially different kind of deci
 
 ## Publish nodes
 
-⚠️ **Mostly solid, two things worth addressing, not a full rewrite:**
-- Rename heading to "Publish nodes" (currently "Publishing")
-- Consider collapsing the four `###` subsections (LinkedIn/Facebook/Instagram/Independent platform publishing) into continuous prose with bold lead-ins, matching the style used in the Image Generation and Email/notification sections — your call whether the subheadings genuinely add value here or just add nesting
-- The independent-publishing explanation is good, but doesn't yet mention *that* cadence eligibility is locked in at draft time rather than re-checked at approval time, or point to where that happens (Phase 5's `create_pending_review`/`publish_post`). Worth a sentence added here, even briefly, since a reader currently learns cadence gating exists without learning why it works the way it does
+Publishing is coordinated by `publish_post` in `pipeline/graph.py` and the individual publisher modules:
+
+```text
+publishers/linkedin.py
+publishers/facebook.py
+publishers/instagram.py
+```
+
+**LinkedIn.** LinkedIn publishing uploads the approved image first and then creates a company post containing the generated caption, hashtags, and image.
+
+**Facebook.** Facebook publishing sends the approved image and caption directly to the configured Trinity Tree Facebook Page using the Meta Graph API.
+
+**Instagram.** Instagram uses Meta's media-container workflow:
+
+```text
+Upload image to GCS
+→ create Instagram media container
+→ wait for processing
+→ publish container
+```
+
+Token refresh and Meta Page-token configuration are documented elsewhere in the README.
+
+**Independent platform publishing.** Each platform is handled independently. `publish_post` checks the stored cadence eligibility for LinkedIn, Facebook, and Instagram separately.
+
+Cadence eligibility is locked when the draft enters pending review: `create_pending_review` stores the per-platform eligibility, and `publish_post` later uses those stored values rather than re-checking cadence when the review is approved. This prevents a delayed approval from changing which platforms were eligible for that post. The full cadence-lock behavior is documented in **Phase 5**.
+
+A platform can therefore be:
+
+* `posted`
+* `skipped_cadence`
+* `failed`
+
+A failure on one platform does not prevent the other eligible platforms from attempting publication.
+
 
 ## Posting cadence
 
-✅ **Content already written and solid — no rewrite needed.** Just rename this heading to "Posting cadence" (currently titled "Posting Cadence") for consistency with the rest of the file's heading style. Correctly cross-references cadence-locking without duplicating it — nothing else to change.
+Posting schedules are defined in pipeline/cadence.py.
+
+The current POSTING_DAYS configuration is:
+
+| Platform  | Posting schedule          |
+| --------- | ------------------------- |
+| LinkedIn  | Monday, Wednesday, Friday |
+| Facebook  | Daily                     |
+| Instagram | Daily                     |
+
+should_post_today() checks whether a platform is eligible to post on a given day.
+
+If no date is provided, the function uses the current business date in:
+
+BUSINESS_TIMEZONE = "America/Phoenix"
+This prevents the posting schedule from being affected by the timezone of the Cloud Run server.
+
+The decision about when cadence eligibility becomes locked into a review is handled elsewhere in the pipeline; cadence.py only determines whether a platform is eligible for a particular date.
 
 ## Storage & run-safety
 
-✅ **Content already written and solid — no rewrite needed.** Just rename this heading to "Storage & run-safety" (currently titled "Storage and Run Safety") for consistency with the rest of the file.
+**GCS image storage.**
+
+pipeline/storage.py supports both uploading and downloading generated images.
+
+Generated image
+→ upload to GCS
+→ human review
+→ download for publishing
+Both directions are needed because Cloud Run's local filesystem is temporary. The original instance that generated the image may no longer exist when the review is approved.
+
+GCS therefore provides durable image storage between generation, approval, and publishing.
+
+It also provides the hosted image URL required by Instagram's publishing flow.
+
+**Run lock.**
+
+pipeline/run_lock.py uses Firestore transactions to prevent multiple scheduled pipeline runs from starting at the same time.
+
+The transaction ensures that checking for an existing lock and acquiring the new lock happens atomically.
+
+A stale-lock timeout is also included. If a run terminates unexpectedly without releasing its lock, an old lock can eventually be treated as stale so future scheduled runs are not blocked permanently.
 
 ## Email/notification system
 
