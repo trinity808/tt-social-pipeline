@@ -27,6 +27,8 @@ pip install -r requirements.txt
 - Meta/Facebook/Instagram values — Meta Business Suite (see Meta token notes below)
 - Secrets that are *not* in `.env` at all (API keys stored in Secret Manager, like `openai-api-key` and `review-gmail-app-password`) are fetched at runtime automatically — no local copy needed as long as you're authenticated (next step)
 
+**Note:** `.env.example` also includes LangSmith tracing variables. These are optional — the pipeline runs fully without them. See the LangGraph execution tracing section below if you want execution visibility beyond Cloud Logging.
+
 **3. Authenticate for local GCP access:**
 ```bash
 gcloud auth application-default login
@@ -164,6 +166,23 @@ Check two things in the output: the `client.knative.dev/nonce` value has changed
 | `REVIEW_EMAIL_FROM` | ✅ | ✅ | Verify exact spelling — a mismatch here caused a real, confusing SMTP auth failure |
 | `OPENAI_API_KEY` | via Secret Manager | via Secret Manager | |
 | `WRITER_MODEL` / `CRITIC_MODEL` | not set (uses fallback) | not set (uses fallback) | Emergency escape hatch only — see model version dependencies section |
+| `LANGSMITH_TRACING` | ✅ | ✅ | Set to `true` — the actual switch; tracing is inert if unset, even with a valid key/project configured |
+| `LANGSMITH_API_KEY` | via Secret Manager | via Secret Manager | |
+| `LANGSMITH_PROJECT` | ✅ | ✅ | |
+
+## LangGraph execution tracing (LangSmith)
+
+**Added to close a real debugging gap, not adopted speculatively.** Cloud Logging shows whatever we explicitly printed, in the order it happened — useful, but it's reconstruction, not visualization. It can't show the actual structure of a graph run, which node did what, or the exact prompt/response exchanged with a model. LangSmith renders this directly, as a real trace tree with per-node timing.
+
+**Setup is purely environment-variable driven for LangGraph's own structure — zero code changes needed for that part.** `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY` (stored in Secret Manager, not a plain env var — see table above), and `LANGSMITH_PROJECT` are enough to get the full node tree (`check_pending_review`, `draft`, `critic`, `generate_image`, etc.), including conditional routing steps, automatically.
+
+**Getting visibility into the actual model calls inside each node required real, per-provider work, though.** Neither `agents/writer.py` nor `agents/image_generator.py` used LangChain's own model wrapper classes — both call the raw `openai` SDK directly — so LangSmith had no visibility into those calls by default. Fixed with `wrap_openai()`, which wraps the client and automatically captures the real prompt, response, and token/cost data for any `chat.completions.create()` or `images.generate()` call made through it.
+
+**`agents/critic.py` needed a different fix, since Google's `genai` SDK has no equivalent wrapper.** The generic `@traceable` decorator only captures a function's own arguments and return value — not local variables computed inside it, which is exactly where the actual constructed prompt and raw Gemini response live. The fix: `@traceable(run_type="llm", process_inputs=...)`, where `process_inputs` reconstructs the real prompt by calling `build_critic_prompt()` a second time with the same arguments. This works safely because that function is deterministic — same inputs always produce the identical prompt string — so this adds visibility without changing `critique_draft()`'s actual behavior at all.
+
+**Confirmed directly: a paused thread does NOT continue the same trace when resumed, and this is expected, not a bug.** LangGraph's "same trace across pause/resume" behavior is a feature of LangGraph Platform's managed deployment API specifically — this project uses a self-hosted `FirestoreSaver` checkpointer with plain `graph.invoke()` calls, which has no such automatic continuity. Every `.invoke()`, whether the original pause or a later resume, is traced as its own fully independent entry in LangSmith, linked only by sharing the same `thread_id` in Firestore — something LangSmith itself has no visibility into.
+
+**Cost is a non-issue at this project's actual scale.** The free tier allows 5,000 traces/month; even counting both the original generation and its eventual resolve as two separate traces, real usage is closer to 60/month — comfortably within free-tier limits with significant headroom for growth.
 
 ## LinkedIn token renewal (annual)
 
